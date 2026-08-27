@@ -1,0 +1,14 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Data
+*.geno
+*.snp
+*.ind
+*.anno
+
+# OS
+.DS_Store
