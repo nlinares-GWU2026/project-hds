@@ -1,5 +1,5 @@
 # Allen Ancient DNA Resource (AADR) Query and Subsetting Tool
-
+## THIS IS SUBMITTED AS LAB 1 - I WILL BE USING THIS ENVIRONMENT FOR THE FINAL PROJECT - THIS IS WHY IT IS PRIVATE REPO AS OF NOW
 [Explanation]
 
 ## Setup
