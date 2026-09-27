@@ -1,4 +1,5 @@
-# AI USAGE LOG
+# AI USAGE LOG 
+### Claude had access to my current proposal, project requirements, and project rubric before answering. 
 - **Tool:**
 - **What I was doing:**
 - **What I asked (verbatim):**
@@ -135,4 +136,149 @@ git push
 - **What I was doing:** Exploring the `.anno` file.
 - **What I asked (verbatim):** "Using pandas, can you help me explore this `.anno` file to understand the data better?"
 - **Exact output (verbatim):**
-- **Verificaiton:**
+The key result is good: **(23089, 49)** matches the line count exactly, so pandas is reading every row correctly, with no quoting or line-break problems hiding in the file.
+
+There's one important issue in how you ran it, though.
+
+## You ran this outside your project environment
+
+Look at the first line of your output:
+
+```
+C:/Users/nelin/AppData/Local/Programs/Python/Python314/python.exe
+```
+
+That's the **Windows** Python installation, not the `aadr-project` conda environment in WSL. It probably happened through VS Code's "Run Python File" button, which uses whichever Python interpreter VS Code has selected, usually the Windows one.
+
+This matters for two reasons:
+
+- **Reproducibility.** Your `environment.yml` pins pandas 2.3.3, but this run used whatever pandas version happens to be installed in Windows Python. Someone following your README would get the pinned version, so your results and theirs could quietly differ.
+- **`convertf` only exists in WSL.** Once the package starts calling `convertf`, running from Windows Python will simply fail. It's better to build the habit of running everything in WSL now.
+
+There's also a smaller issue: the script is in `src/`, which is where the `aadrkit` package will live. Exploration scripts aren't part of the package, so they belong in their own folder. Keep the script and commit it, though. It's a useful record of how you explored the data.
+
+### The fix (one command at a time, in a WSL terminal)
+
+**1. Go to your repo.** WSL sees your Windows drive under `/mnt/c`, and the quotes handle the spaces in your folder names:
+
+```bash
+cd "/mnt/c/Users/nelin/Desktop/GWU Information/GWU Fall 2026/Applied_Computing/project-hds"
+```
+
+**2. Create a `scripts` folder and move the script into it:**
+
+```bash
+mkdir -p scripts
+```
+
+```bash
+mv src/explore_anno.py scripts/
+```
+
+**3. Check the file path inside the script.** It should be `"data/raw/v66.p1_1240K.aadr.PUB.anno"`, a path relative to the repo root. If it's `../data/...` or a full `C:/...` path, change it. A `C:/` path won't exist on anyone else's computer, and you'll always run scripts from the repo root.
+
+**4. Run it in the project environment:**
+
+```bash
+conda activate aadr-project
+```
+
+```bash
+python scripts/explore_anno.py
+```
+
+You should get the same `(23089, 49)` and column list, this time produced by the pinned environment.
+
+If you like working in VS Code: running `code .` from your WSL terminal opens the folder in WSL mode, where you can select `aadr-project` as the interpreter so the Run button uses the right environment.
+
+## What the columns tell us
+
+Here's how the 49 columns map onto the filters promised in your problem statement (region, time period, lineage, coverage):
+
+| Filter | Column(s) | Notes |
+|---|---|---|
+| ID for `convertf` | 0 Genetic ID | Should match the IDs in the `.ind` file, which is how the filter results connect to the genotype extraction |
+| Region | 16 Political Entity, 15 Locality, 17–18 Latitude/Longitude | Country for simple filtering; coordinates allow a bounding-box filter |
+| Time period | 10 Date mean in BP | "BP" means years before 1950 CE, so 5000 BP is about 3050 BCE |
+| Population | 14 Group ID | Likely the same labels as the `.ind` file's population column |
+| Lineage | 35 Y haplogroup (ISOGG), 38 mtDNA haplogroup | Covers "lineage" from your problem statement |
+| Coverage | 26 SNPs hit on 1240k snpset | Use 26, not 25, 27, 28, or 29. Those count SNPs on other panels, and your file is the 1240K panel |
+| Quality | 47 ASSESSMENT | A possible "passing samples only" filter |
+
+A few details in the column names will matter once you write code:
+
+- **Column 33 ends in `.1`.** The file has two columns with exactly the same name, so pandas renamed the second one to keep them distinct. If code looks up that column by name, it has to use the `.1` version.
+- **Column 25 has a trailing space** at the end of its name. Code that types the name without the space won't find the column. Details like these are why `aadrkit` should store its own short names mapped to the exact real names, tied to the pinned v66.p1 version.
+- **Missing values are written as `".."`.** Column 24's description mentions this directly. pandas won't treat `".."` as missing automatically, so numeric columns like dates or SNP counts may load as text. That's exactly what Step 2 will check.
+- **One person can have several rows.** Column 0's description explains the suffixes: `.AG`, `.DG`, `.SG`, and others mark different data types for the same individual. A filter could return the same person twice, so you'll need to decide how to handle duplicates.
+
+One idea to think about, not decide now: columns 5–7 hold each individual's publication and DOI. `aadrkit` could export a list of the original papers to cite for whatever subset you extract. That turns the citation obligation in your README into something the tool actually helps with.
+- **Verificaiton:** I developed the script Claude wrote and added its suggestion about exporting publications of subsetted individuals to the project proposal. 
+
+## Entry 3
+- **Tool:** Claude (Opus 5.5)
+- **What I was doing:** After exploring the data, I noticed there were missing values reported as "..". I wanted to know whether the columns contain concrete/clear numbers. 
+- **What I asked (verbatim):** "Can you help me develop a script that will profile my columns/data?
+- **Exact output (verbatim):**
+Nice work keeping the repo updated as you go. Those small, steady commits are exactly what the code rubric looks for.
+
+## Step 2: Profile the numeric columns
+
+Before you can filter by date or coverage, you need to know whether those columns actually contain clean numbers. Last time we saw that AADR writes missing values as `".."`. If a column holds even one `".."`, pandas stores the whole column as text, and a filter like "date greater than 5000" either errors out or silently gives wrong results.
+
+We'll check the four numeric columns your filters depend on: date (10), latitude (17), longitude (18), and 1240K SNPs hit (26). The text columns (country, group, publications, assessment) come next, as a separate step.
+
+Create a new file, `scripts/profile_anno.py`. The first lines can match how your `explore_anno.py` already builds the path:
+
+```python
+from pathlib import Path
+import pandas as pd
+
+ROOT = Path(__file__).resolve().parent.parent
+anno = pd.read_csv(ROOT / "data" / "raw" / "v66.p1_1240K.aadr.PUB.anno",
+                   sep="\t", low_memory=False)
+
+# Numeric columns: date (10), latitude (17), longitude (18), 1240K SNPs hit (26)
+for i in [10, 17, 18, 26]:
+    col = anno.columns[i]
+    nums = pd.to_numeric(anno[col], errors="coerce")
+    print(f"\n=== Column {i}: {col[:60]} ===")
+    print("pandas dtype:", anno[col].dtype)
+    print("values that aren't numbers:", nums.isna().sum())
+    print(anno.loc[nums.isna(), col].value_counts(dropna=False).head(10))
+    print(nums.describe())
+```
+
+Here's what each part does:
+
+- **`anno.columns[i]`** looks up a column by its position number, so you don't have to type the long names.
+- **`pd.to_numeric(..., errors="coerce")`** tries to turn every value into a number. Anything that can't be converted, like `".."`, becomes `NaN` (pandas' marker for "missing"). Counting the `NaN`s tells you how many entries aren't usable numbers.
+- **`value_counts(...)`** shows *what* those unusable entries actually look like, and how often each appears. `dropna=False` includes cells that were completely empty in the file.
+- **`describe()`** summarizes the values that did convert: count, mean, minimum, maximum, and quartiles. This is your plausibility check.
+- **`col[:60]`** prints only the first 60 characters of each column name, so the output stays readable.
+
+Run it in your WSL terminal from the repo root, with `aadr-project` active:
+
+```bash
+python scripts/profile_anno.py
+```
+
+## What to look for
+
+- **pandas dtype:** `float64` or `int64` means the column is already clean numbers. `object` means pandas treated it as text because something non-numeric is in it.
+- **Values that aren't numbers:** how many, and what they are, whether `".."`, empty cells, or something unexpected.
+- **Minimum and maximum:**
+  - **Latitude** must fall between −90 and 90, and **longitude** between −180 and 180. Anything outside those ranges is a data-entry error.
+  - **Date** should be 0 or higher. Present-day individuals likely sit at or near 0 BP, and the oldest samples should be in the tens of thousands of years.
+  - **SNPs hit** can't exceed the number of SNPs on the 1240K panel, which is a bit over 1.2 million.
+
+Paste me the output, and we'll decide together how `aadrkit` should handle whatever problems turn up. Then commit the script so your exploration stays on record:
+
+```bash
+git add scripts/profile_anno.py
+```
+
+```bash
+git commit -m "Add numeric column profiling for anno file"
+```
+- **Verificaiton:** I developed the script, ran it, and visually inspected the results and interpreted them on my own before continuing. 
