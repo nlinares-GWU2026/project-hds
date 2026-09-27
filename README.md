@@ -19,9 +19,10 @@ python src/placeholder.py
 
 ### R (renv)
 In R or RStudio terminal:
+- First, open the R project `project-hds`:
 ```r
 renv::restore()
-source("src/placeholder.R")
+source("src/placeholder.R") # Check that the placeholder script is running. 
 ```
 
 ### Docker (optional)
