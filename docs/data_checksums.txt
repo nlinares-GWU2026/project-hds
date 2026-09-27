@@ -1,1 +1,1 @@
-4a8e15d0b8d5a8bd6c929ccab7ff83a17091dc91b5e0d8015d9896dd9a5f7f7a  data/raw/v66.1240K.aadr.PUB.anno
+4a8e15d0b8d5a8bd6c929ccab7ff83a17091dc91b5e0d8015d9896dd9a5f7f7a  data/raw/v66.p1_1240K.aadr.PUB.anno
