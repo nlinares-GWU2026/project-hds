@@ -73,4 +73,4 @@ git add docs/data_checksums.txt
 ```bash
 git commit -m "Record checksum for AADR v66.0 1240K anno file"
 ```
-- **How I verified:** I completed all steps and the file downloaded accurately. MD5 checksum: a2db1ac16f0f3558ed66fb251e1d5c7d
+- **How I verified:** I completed all steps and the file downloaded accurately. MD5 checksum: a2db1ac16f0f3558ed66fb251e1d5c7d. Link to paste "https://dataverse.harvard.edu/api/access/datafile/13994515".
