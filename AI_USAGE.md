@@ -2,7 +2,8 @@
 - **Tool:**
 - **What I was doing:**
 - **What I asked (verbatim):**
-- **Exact output (verbatim):** 
+- **Exact output (verbatim):**
+- **Verificaiton:**
 ## Entry 1
 - **Tool:** Claude (Opus 5.5)
 - **What I was doing:** Downloading the `.anno` file from AADR
@@ -127,4 +128,11 @@ git commit -m "Use original Dataverse filename (v66.p1) for anno file"
 ```bash
 git push
 ```
-- **How I verified:** I completed all steps and the file downloaded accurately. MD5 checksum: a2db1ac16f0f3558ed66fb251e1d5c7d. Link to paste "https://dataverse.harvard.edu/api/access/datafile/13994515".
+- **Verification:** I completed all steps and the file downloaded accurately. MD5 checksum: a2db1ac16f0f3558ed66fb251e1d5c7d. Link to paste "https://dataverse.harvard.edu/api/access/datafile/13994515".
+
+## Entry 2
+- **Tool:** Claude (Opus 5.5)
+- **What I was doing:** Exploring the `.anno` file.
+- **What I asked (verbatim):** "Using pandas, can you help me explore this `.anno` file to understand the data better?"
+- **Exact output (verbatim):**
+- **Verificaiton:**
