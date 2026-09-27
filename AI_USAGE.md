@@ -73,4 +73,58 @@ git add docs/data_checksums.txt
 ```bash
 git commit -m "Record checksum for AADR v66.0 1240K anno file"
 ```
+## The real filename is different from what I gave you
+
+Look at this part of the `wget` output, in the long redirect link:
+
+```
+filename*=UTF-8''v66.p1_1240K.aadr.PUB.anno
+```
+
+That's the file's actual name on Dataverse: **`v66.p1_1240K.aadr.PUB.anno`**. The name I gave you came from a secondary source (the ArcGIS visualizer page), not from Dataverse itself. Because `wget -O` saves under whatever name you tell it, the file got my name instead of the real one.
+
+The **`p1`** matters. It most likely means "patch 1": a corrected re-release of v66 made after the original April release. Two things support that:
+
+- **The file date.** `ls -lh` shows `Jun 8`. `wget` keeps the server's last-modified date, so the file was updated in June, about two months after v66.0 came out.
+- **The line count.** You have 23,090 lines versus the reference's 23,250 rows. A patch release that corrected or removed some entries would explain that gap. The reference was a third-party example, not ground truth, so a small difference isn't alarming on its own.
+
+For reproducibility and citation, you should record the version you actually have, which is v66.p1, not v66.0.
+
+## Fixing it (one command at a time)
+
+**1. Rename the file to its original name:**
+
+```bash
+mv data/raw/v66.1240K.aadr.PUB.anno data/raw/v66.p1_1240K.aadr.PUB.anno
+```
+
+**2. Regenerate the checksum file,** since it currently records the old name:
+
+```bash
+sha256sum data/raw/v66.p1_1240K.aadr.PUB.anno >| docs/data_checksums.txt
+```
+
+This uses `>|` instead of `>`. Your shell has `noclobber` on, so a plain `>` would refuse to overwrite the existing checksum file. `>|` means "yes, I really mean to overwrite this one."
+
+**3. Test the checksum file,** exactly as someone reproducing your work would:
+
+```bash
+sha256sum -c docs/data_checksums.txt
+```
+
+You should see the filename followed by `OK`.
+
+**4. Commit and push.** You haven't pushed the earlier commit yet, so both go up together:
+
+```bash
+git add docs/data_checksums.txt
+```
+
+```bash
+git commit -m "Use original Dataverse filename (v66.p1) for anno file"
+```
+
+```bash
+git push
+```
 - **How I verified:** I completed all steps and the file downloaded accurately. MD5 checksum: a2db1ac16f0f3558ed66fb251e1d5c7d. Link to paste "https://dataverse.harvard.edu/api/access/datafile/13994515".
