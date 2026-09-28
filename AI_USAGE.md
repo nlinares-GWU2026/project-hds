@@ -279,6 +279,111 @@ git add scripts/profile_anno.py
 ```
 
 ```bash
-git commit -m "Add numeric column profiling for anno file"
+git commit -m "Add column profiling for anno file"
 ```
-- **Verificaiton:** I developed the script, ran it, and visually inspected the results and interpreted them on my own before continuing. 
+This is a really informative result. Two of your four columns are perfectly clean, and the other two have one specific, fixable problem. Here's what each one tells us.
+
+## What the output shows
+
+**Date (column 10): clean, with one surprise.**
+- `int64` with zero non-numbers means every row has a usable date.
+- The **minimum is −4**, not 0. Since BP counts backward from 1950, a negative value means *after* 1950: −4 BP is 1954 CE, most likely a recently sampled present-day individual. So the filter can't assume dates are always 0 or higher.
+- The **maximum is 185,000 BP**, which is far older than any modern human sample. The dataset includes some very old, likely archaic individuals, so a user asking for "everything older than 10,000 BP" gets a very wide time span.
+- The **median is 1,938 BP**, so half of all individuals are younger than about 2,000 years.
+
+**Latitude and longitude (columns 17 and 18): one known problem.**
+- Both are `object` (text) because of **784 `".."` entries**, which is AADR's missing-value marker, exactly as we expected.
+- The ranges that did convert are all valid: latitude runs from −55 (roughly the southern tip of South America) to 75 (the Arctic), well within −90 to 90. Longitude stays within −180 to 180.
+- Both columns have exactly 784 missing values, which suggests the same individuals lack both coordinates. That still needs confirming (below).
+
+**SNPs hit (column 26): clean.**
+- `int64`, no missing values.
+- The maximum, 1,150,639, is below the panel's roughly 1.2 million SNPs, so it passes the plausibility check.
+- The **minimum is 281 SNPs**, which is extremely low. The middle value is about 684,000. Individuals with very little data are real and present in the file, which is exactly why a coverage filter is useful. The threshold should be the user's choice, not hard-coded, since different analyses need different amounts of data.
+
+## Design decisions this suggests
+
+These are worth writing into `docs/anno_notes.md` in your own words, since they'll shape the package code:
+
+1. **Load the file with `na_values=[".."]`** in `pd.read_csv`. pandas then treats `".."` as missing from the start, and latitude and longitude load as real numbers instead of text.
+2. **Don't assume dates are 0 or higher.** Negative BP values are valid.
+3. **The date filter uses the mean date (column 10).** Column 11 holds each date's uncertainty, so a more precise "date range overlaps" filter is possible later. The simple version is the right place to start, as long as the documentation says which one it uses.
+4. **The region filter should report what it drops.** If someone filters by a coordinate box, individuals without coordinates can't be included. Silently dropping 784 people is a transparency problem, so the tool should print something like "784 individuals have no coordinates and were excluded." The country column may still work for those individuals; we'll check it next.
+5. **Coverage threshold is user-chosen,** with no hidden default.
+
+## Two quick checks before moving on
+
+Add these lines to the bottom of `profile_anno.py`:
+
+```python
+lat_missing = anno.iloc[:, 17] == ".."
+lon_missing = anno.iloc[:, 18] == ".."
+print("\nRows missing both lat and lon:", (lat_missing & lon_missing).sum())
+print("Dates below 0 BP:", (anno.iloc[:, 10] < 0).sum())
+print("Dates exactly 0 BP:", (anno.iloc[:, 10] == 0).sum())
+```
+
+- **The first check** confirms whether the 784 missing latitudes and 784 missing longitudes are the same rows. `&` means "both conditions true in the same row."
+- **The date checks** show how many individuals are post-1950 or dated exactly at 0. That tells us whether date alone can separate ancient from present-day individuals, which would make an "ancient only" filter straightforward.
+
+Run it again:
+
+```bash
+python scripts/profile_anno.py
+```
+
+Paste me just those three new lines of output, then commit the updated script. After that, we'll profile the text columns: country, group ID, the publication columns, and the quality assessment.
+
+All three numbers are useful, and one of them raises a question worth checking.
+
+**784 rows missing both coordinates.** The missing latitudes and longitudes are the same 784 individuals, so it's one group of people without a location, not two overlapping problems. A coordinate-based region filter will exclude exactly those 784, and the tool can report that number cleanly.
+
+**1 date below 0 BP.** That's the single −4 BP individual. It's a real edge case, but only one row, and it doesn't break anything as long as the filter doesn't reject negative dates.
+
+**3,970 dates exactly at 0 BP.** This is the interesting one. The AADR includes present-day individuals for comparison, and a date of 0 most likely marks them. If so, "ancient only" could simply mean "date above 0," which would be a very natural filter to offer. But we haven't confirmed that 0 always means "present-day." It's possible some ancient individuals with unknown dates were also entered as 0. That's worth checking before building a filter on the assumption.
+
+
+## Profile the text columns
+
+This step looks at four text columns and also answers the 0 BP question:
+
+- **16 Political Entity** (country), for the region filter
+- **14 Group ID** (population label), for the population filter
+- **21 Data type**, which should help identify present-day individuals
+- **47 ASSESSMENT** (quality), for a possible quality filter
+
+Add this to the bottom of `profile_anno.py`:
+
+```python
+for i in [16, 14, 21, 47]:
+    col = anno.columns[i]
+    print(f"\n=== Column {i}: {col[:60]} ===")
+    print("unique values:", anno[col].nunique())
+    print('".." entries:', (anno[col] == "..").sum())
+    print("empty cells:", anno[col].isna().sum())
+    print(anno[col].value_counts().head(10))
+
+print("\n=== All countries (column 16), sorted ===")
+print(sorted(anno.iloc[:, 16].dropna().unique()))
+
+print("\n=== Data type for rows at or below 0 BP ===")
+print(anno.loc[anno.iloc[:, 10] <= 0, anno.columns[21]].value_counts())
+```
+
+Here's what each piece tells you:
+
+- **`nunique()`** counts distinct values. For example, how many different countries or population groups are in the data.
+- **The `".."` and empty-cell counts** show missing values in both of the ways AADR might record them. For text columns, pandas reads a truly blank cell as missing but reads `".."` as ordinary text, so we count them separately.
+- **`value_counts().head(10)`** shows the ten most common values and how often each appears. For ASSESSMENT, this reveals the quality categories you'd let users filter on.
+- **The sorted country list** is there to catch inconsistent spellings. If the same country appears as both "USA" and "United States," or with different capitalization, a user filtering for one would silently miss the other. Sorting puts near-duplicates next to each other, so they're easy to spot.
+- **The last block** shows the data types of all the individuals at or below 0 BP. If they're overwhelmingly one present-day data type, that supports "date above 0 = ancient." If a meaningful number are ancient-looking data types, then 0 is also being used for unknown dates, and the filter needs a different approach.
+
+Run it:
+
+```bash
+python scripts/profile_anno.py
+```
+
+The output will be long, mostly because of the country list. Paste it all in, and we'll go through it together.
+
+- **Verificaiton:** I developed the script, ran it, and visually inspected the results and interpreted them on my own, and added to my notes with the findings before continuing. 
