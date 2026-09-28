@@ -16,3 +16,8 @@ venv/
 
 .Rhistory
 data/
+# R session files
+.RData
+.Rhistory
+.Rproj.user/
+.Ruserdata
