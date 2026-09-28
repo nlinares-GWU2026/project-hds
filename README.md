@@ -14,7 +14,7 @@ git clone https://github.com/nlinares-GWU2026/project-hds.git
 cd project-hds
 mamba env create -f environment.yml
 conda activate aadr-project
-python src/placeholder.py
+python scripts/profile_anno.py
 ```
 
 ### R (renv)
@@ -22,7 +22,6 @@ In R or RStudio terminal:
 - First, open the R project `project-hds`:
 ```r
 renv::restore()
-source("src/placeholder.R") # Check that the placeholder script is running. 
 ```
 
 ### Docker (optional)
