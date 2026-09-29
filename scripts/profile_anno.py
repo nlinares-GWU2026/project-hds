@@ -31,8 +31,8 @@ for i in [16, 14, 21, 47]:
     print('".." entries:', (anno[col] == "..").sum())
     print("empty cells:", anno[col].isna().sum()) # Both two lines show missing values in ways AADR might record
     print(anno[col].value_counts().head(10)) # 10 most common values and how often each appears (quality categories)
-    print("\n=== All countries (column 16), sorted ===")
-    print(sorted(anno.iloc[:, 16].dropna().unique())) # Sorted country list to catch inconsistent spellings and namings 
+print("\n=== All countries (column 16), sorted ===")
+print(sorted(anno.iloc[:, 16].dropna().unique())) # Sorted country list to catch inconsistent spellings and namings 
 
-    print("\n=== Data type for rows at or below 0 BP ===")
-    print(anno.loc[anno.loc[:, 10] <= 0, anno.columns[21]].value_counts())
+print("\n=== Data type for rows at or below 0 BP ===")
+print(anno.loc[anno.iloc[:, 10] <= 0, anno.columns[21]].value_counts())
