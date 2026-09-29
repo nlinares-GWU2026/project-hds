@@ -386,4 +386,70 @@ python scripts/profile_anno.py
 
 The output will be long, mostly because of the country list. Paste it all in, and we'll go through it together.
 
+- **What I asked next (verbatim):** (pasted the output of the script)
+- **Exact output (verbatim):** 
+
+- **Country:** only 10 missing, with AADR's labels matched exactly and a "list available values" helper for users.
+- **Assessment:** nine categories with inconsistent capitalization, and the `PROVISIONAL_`/`MERGE_` prefixes need a source before you design around them.
+
+The new information is in columns 14 and 21.
+
+## Group ID (column 14)
+
+- **3,897 distinct groups, no missing values.** That's far too many for anyone to scroll through, so a "list available values" helper matters even more here than for countries.
+- **The labels follow a naming pattern**, roughly *place_period_culture*. For example, `Czechia_EBA_Unetice` is Czechia, Early Bronze Age, Unetice culture, and `Poland_IA` is Poland in the Iron Age. `Sweden_Viking` and `Belgium_HighMedieval` follow the same idea. The AADR paper cites a 2018 article by Eisenmann and colleagues about this naming system, which is worth reading before you rely on the abbreviations. I'm not certain what every short code means (for example, the `C` in `Spain_C`), so check the source rather than guessing.
+- **`TSI`, `GWD`, and `CHS` are different.** These are 1000 Genomes Project codes for **present-day populations**: Tuscans in Italy, Gambians, and Southern Han Chinese. So present-day individuals clearly are in this file, with their own style of label.
+
+**What this means for the filter:** exact matching works when a user knows the precise group name. But a researcher will often want *every* Iron Age group, or every group containing "Viking." That's a pattern search, which is a regular expression (Week 4 material, so another genuine course tie). The catch is that patterns can over-match: searching for `_C` would also catch any group with "_C" anywhere in its name. So pattern matching needs careful anchoring, and your tests should include a case that checks for over-matching.
+
+This column also matters for later: Group ID is most likely the same population label used in the `.ind` file, which is how the filter results connect to `convertf`.
+
+## Data type (column 21)
+
+This is the messiest column so far, which makes it a good real-world example for your report:
+
+- **Case inconsistency:** `1240k` appears 11,079 times and `1240K` 43 times. They're the same thing written two ways, the classic problem case-insensitive matching solves.
+- **Multiple values in one cell:** entries like `1240k,Twist1.4M` and `1240k,Shotgun` combine data types with commas. A filter would have to split them apart first.
+- **A note instead of a category:** "Shotgun pulled down only on 1240k autosomal targets - need to make a whole genome bam" (86 rows) is a processing note, not a data type.
+
+Your problem statement doesn't promise a data-type filter, and I'd keep it that way. Coverage (column 26) already handles the "is there enough data?" question more directly. Record the messiness in your notes, and treat a data-type filter as out of scope, the same way you handled the JSON idea.
+
+## The 0 BP question: stronger evidence, still not confirmed
+
+Two findings now point the same way:
+
+- **Almost all Shotgun.diploid rows are at 0 BP.** Of the 3,800 Shotgun.diploid rows in the whole file, 3,726 are dated at 0 BP.
+- **Present-day population labels** like `TSI`, `GWD`, and `CHS` are among the most common groups.
+
+That strongly suggests 0 BP means present-day. The one `1240k` row and the 240 plain `Shotgun` rows still need checking, though. So Column 12's Full Date text is the final check.
+
+## Next: the Full Date check
+
+Add this to the bottom of `profile_anno.py`:
+
+```python
+cols = [0, 10, 12, 14, 21]
+short = ["genetic_id", "date_bp", "full_date", "group_id", "data_type"]
+at_or_below_zero = anno.iloc[:, 10] <= 0
+
+print("\n=== Full Date text for rows at or below 0 BP ===")
+print(anno.loc[at_or_below_zero, anno.columns[12]].value_counts().head(10))
+
+unusual = at_or_below_zero & ~anno.iloc[:, 21].isin(["Shotgun.diploid", "Shotgun"])
+unusual = unusual | (anno.iloc[:, 10] < 0)
+print("\n=== Unusual rows at or below 0 BP ===")
+print(anno.loc[unusual].iloc[:, cols].set_axis(short, axis=1).to_string())
+```
+
+Here's what each part does:
+
+- **The first block** lists the most common Full Date descriptions among the 0 BP rows. If they almost all say something like "present," that's strong evidence that 0 BP means present-day.
+- **`~`** means NOT and **`isin([...])`** checks whether a value is in a list. So the `unusual` line picks rows that are at or below 0 BP and are **not** one of the two shotgun types.
+- **`|`** means OR, so the next line also adds the −4 row.
+- **`set_axis(short, axis=1)`** renames the columns for display only. It's a small preview of the short-name mapping `aadrkit` will need.
+- **`to_string()`** prints every row instead of abbreviating the middle. There should only be about six rows here.
+
+Keep all of these lines unindented, since none of them are inside a loop.
+
+Run it and paste just the two new sections. Your prompt also shows `main ✗`, which means you have uncommitted changes, so commit the updated script once it runs correctly.
 - **Verificaiton:** I developed the script, ran it, and visually inspected the results and interpreted them on my own, and added to my notes with the findings before continuing. 
