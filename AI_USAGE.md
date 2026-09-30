@@ -10,7 +10,7 @@
 - **What I was doing:** Downloading the `.anno` file from AADR
 - **What I asked (verbatim):** "How do I download the `.anno` file correctly from Harvard Dataverse via terminal?"
 - **Exact output (verbatim):**
-## Downloading the `.anno` file
+### Downloading the `.anno` file
 
 **Which file:** Use the 1240K version. The AADR's own visualizer project took its metadata from the file v66.1240K.aadr.PUB.anno. The 1240K panel is the one the AADR uses to represent the world's published ancient human DNA data at more than a million SNPs at which almost all ancient individuals have been assayed. That makes it the natural default for a tool focused on ancient samples. The HO (Human Origins) version has more modern populations but fewer SNPs.
 
@@ -75,7 +75,7 @@ git add docs/data_checksums.txt
 ```bash
 git commit -m "Record checksum for AADR v66.0 1240K anno file"
 ```
-## The real filename is different from what I gave you
+### The real filename is different from what I gave you
 
 Look at this part of the `wget` output, in the long redirect link:
 
@@ -92,7 +92,7 @@ The **`p1`** matters. It most likely means "patch 1": a corrected re-release of 
 
 For reproducibility and citation, you should record the version you actually have, which is v66.p1, not v66.0.
 
-## Fixing it (one command at a time)
+### Fixing it (one command at a time)
 
 **1. Rename the file to its original name:**
 
@@ -140,7 +140,7 @@ The key result is good: **(23089, 49)** matches the line count exactly, so panda
 
 There's one important issue in how you ran it, though.
 
-## You ran this outside your project environment
+### You ran this outside your project environment
 
 Look at the first line of your output:
 
@@ -191,7 +191,7 @@ You should get the same `(23089, 49)` and column list, this time produced by the
 
 If you like working in VS Code: running `code .` from your WSL terminal opens the folder in WSL mode, where you can select `aadr-project` as the interpreter so the Run button uses the right environment.
 
-## What the columns tell us
+### What the columns tell us
 
 Here's how the 49 columns map onto the filters promised in your problem statement (region, time period, lineage, coverage):
 
@@ -222,7 +222,7 @@ One idea to think about, not decide now: columns 5–7 hold each individual's pu
 - **Exact output (verbatim):**
 Nice work keeping the repo updated as you go. Those small, steady commits are exactly what the code rubric looks for.
 
-## Step 2: Profile the numeric columns
+### Step 2: Profile the numeric columns
 
 Before you can filter by date or coverage, you need to know whether those columns actually contain clean numbers. Last time we saw that AADR writes missing values as `".."`. If a column holds even one `".."`, pandas stores the whole column as text, and a filter like "date greater than 5000" either errors out or silently gives wrong results.
 
@@ -263,7 +263,7 @@ Run it in your WSL terminal from the repo root, with `aadr-project` active:
 python scripts/profile_anno.py
 ```
 
-## What to look for
+### What to look for
 
 - **pandas dtype:** `float64` or `int64` means the column is already clean numbers. `object` means pandas treated it as text because something non-numeric is in it.
 - **Values that aren't numbers:** how many, and what they are, whether `".."`, empty cells, or something unexpected.
@@ -283,7 +283,7 @@ git commit -m "Add column profiling for anno file"
 ```
 This is a really informative result. Two of your four columns are perfectly clean, and the other two have one specific, fixable problem. Here's what each one tells us.
 
-## What the output shows
+### What the output shows
 
 **Date (column 10): clean, with one surprise.**
 - `int64` with zero non-numbers means every row has a usable date.
@@ -301,7 +301,7 @@ This is a really informative result. Two of your four columns are perfectly clea
 - The maximum, 1,150,639, is below the panel's roughly 1.2 million SNPs, so it passes the plausibility check.
 - The **minimum is 281 SNPs**, which is extremely low. The middle value is about 684,000. Individuals with very little data are real and present in the file, which is exactly why a coverage filter is useful. The threshold should be the user's choice, not hard-coded, since different analyses need different amounts of data.
 
-## Design decisions this suggests
+### Design decisions this suggests
 
 These are worth writing into `docs/anno_notes.md` in your own words, since they'll shape the package code:
 
@@ -311,7 +311,7 @@ These are worth writing into `docs/anno_notes.md` in your own words, since they'
 4. **The region filter should report what it drops.** If someone filters by a coordinate box, individuals without coordinates can't be included. Silently dropping 784 people is a transparency problem, so the tool should print something like "784 individuals have no coordinates and were excluded." The country column may still work for those individuals; we'll check it next.
 5. **Coverage threshold is user-chosen,** with no hidden default.
 
-## Two quick checks before moving on
+### Two quick checks before moving on
 
 Add these lines to the bottom of `profile_anno.py`:
 
@@ -343,7 +343,7 @@ All three numbers are useful, and one of them raises a question worth checking.
 **3,970 dates exactly at 0 BP.** This is the interesting one. The AADR includes present-day individuals for comparison, and a date of 0 most likely marks them. If so, "ancient only" could simply mean "date above 0," which would be a very natural filter to offer. But we haven't confirmed that 0 always means "present-day." It's possible some ancient individuals with unknown dates were also entered as 0. That's worth checking before building a filter on the assumption.
 
 
-## Profile the text columns
+### Profile the text columns
 
 This step looks at four text columns and also answers the 0 BP question:
 
@@ -394,7 +394,7 @@ The output will be long, mostly because of the country list. Paste it all in, an
 
 The new information is in columns 14 and 21.
 
-## Group ID (column 14)
+### Group ID (column 14)
 
 - **3,897 distinct groups, no missing values.** That's far too many for anyone to scroll through, so a "list available values" helper matters even more here than for countries.
 - **The labels follow a naming pattern**, roughly *place_period_culture*. For example, `Czechia_EBA_Unetice` is Czechia, Early Bronze Age, Unetice culture, and `Poland_IA` is Poland in the Iron Age. `Sweden_Viking` and `Belgium_HighMedieval` follow the same idea. The AADR paper cites a 2018 article by Eisenmann and colleagues about this naming system, which is worth reading before you rely on the abbreviations. I'm not certain what every short code means (for example, the `C` in `Spain_C`), so check the source rather than guessing.
@@ -404,7 +404,7 @@ The new information is in columns 14 and 21.
 
 This column also matters for later: Group ID is most likely the same population label used in the `.ind` file, which is how the filter results connect to `convertf`.
 
-## Data type (column 21)
+### Data type (column 21)
 
 This is the messiest column so far, which makes it a good real-world example for your report:
 
@@ -414,7 +414,7 @@ This is the messiest column so far, which makes it a good real-world example for
 
 Your problem statement doesn't promise a data-type filter, and I'd keep it that way. Coverage (column 26) already handles the "is there enough data?" question more directly. Record the messiness in your notes, and treat a data-type filter as out of scope, the same way you handled the JSON idea.
 
-## The 0 BP question: stronger evidence, still not confirmed
+### The 0 BP question: stronger evidence, still not confirmed
 
 Two findings now point the same way:
 
@@ -423,7 +423,7 @@ Two findings now point the same way:
 
 That strongly suggests 0 BP means present-day. The one `1240k` row and the 240 plain `Shotgun` rows still need checking, though. So Column 12's Full Date text is the final check.
 
-## Next: the Full Date check
+### Next: the Full Date check
 
 Add this to the bottom of `profile_anno.py`:
 
@@ -453,3 +453,11 @@ Keep all of these lines unindented, since none of them are inside a loop.
 
 Run it and paste just the two new sections. Your prompt also shows `main ✗`, which means you have uncommitted changes, so commit the updated script once it runs correctly.
 - **Verificaiton:** I developed the script, ran it, and visually inspected the results and interpreted them on my own, and added to my notes with the findings before continuing. 
+
+
+## Entry 4
+- **Tool:** Claude (Opus 5.5)
+- **What I was doing:** Choosing test individuals so I could verify the tool against expected output especially with the tricky cases I discovered during profiling the `.anno` data. 
+- **What I asked (verbatim):** Can you help me write a script to choose test individuals to verify against the tool's output that covers the tricky cases I found during the profiling: 1. present-day (0 BP), 2. reference genome (like `Chimp.REF`), 3. the one post-1950 individual (-4 BP), 4. someone with missing coordinates, 5. someone with low coverage, 6. someone from a place AADR lists separately (Canary Islands), 7. Someone whose group matches a pattern like "Viking, 8. a person with several rows. First check duplicates and publications to see how often one person appears in several rows before choosing test. Next, choose individuals. Finally, verify each one by hand with `grep` and record expected  values. 
+- **Exact output (verbatim):**
+- **Verificaiton:**
