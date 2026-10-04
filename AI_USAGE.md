@@ -630,3 +630,117 @@ python scripts/find_candidates.py
 ```
 
 Paste the output. Then we'll pick one individual from each section and put together your final list of test individuals.
+- **What I asked next (verbatim):** Pasted the output of `find_test_indiv.py`. I want to use the following individuals "Chimp.REF" (ref genome), "Khwit.SG" (post-1950 date), "JHF05.AG" (present day individual with "ancient" data method), "NA20813.DG" (standard present-day individual), "YCH017.AG" (person with 11 rows), "I8508.AG" (missing coordinate but has a country Uzbekistan), "I13976.SG" (lowest coverage), "gun005.SG" (for the Canary Island that should not appear as Spain), "VK202.AG" (for both no DOI and the outlier test)
+- **Exact output (verbatim):**
+Every section turned up a good candidate, and a couple of them revealed something new. First the new finding, then your final list, then Part C.
+
+## A new finding: the `-o` suffix
+
+Look at these group names:
+
+- `Scotland_Viking-o` (VK201)
+- `Altaian-o` (Altais1)
+- `Russia_Karasuk-oAegean` (RISE492)
+
+In AADR's naming, a `-o` suffix generally marks an **outlier**: an individual whose genetics don't match the rest of their labeled group. Confirm that in the AADR documentation or the naming-convention paper before relying on it. Sometimes extra text follows it, like `-oAegean`.
+
+This matters a lot for the population filter:
+
+- An **exact match** for `Scotland_Viking` returns VK202 but **not** VK201.
+- A **"contains"** search for `Scotland_Viking` returns **both**.
+
+Whether outliers belong in a researcher's analysis is their scientific decision, not the tool's. So `aadrkit` should make the behavior explicit and document it clearly. VK201 and VK202 together make an ideal pair of tests: they share a group name except for the suffix, so they show exactly how each matching mode behaves.
+
+A smaller observation: the Tuscan present-day individuals all have latitude `40.00001`. That looks like an approximate location for the population, not an exact sampling site, so don't build tests that depend on precise coordinates for present-day individuals.
+
+## Part B: Your test individuals
+
+| # | Genetic ID | What it tests |
+|---|---|---|
+| 1 | `Chimp.REF` | Reference genome: excluded by default. Also "Unpublished," with no country or coordinates |
+| 2 | `Khwit.SG` | The only post-1950 date (−4 BP, 1954 CE) |
+| 3 | `JHF05.AG` | Present-day individual with an "ancient-style" data type (1240k) |
+| 4 | `NA20813.DG` | Standard present-day individual (TSI, Italy) |
+| 5 | `YCH017.AG` | Person with 11 rows: deduplication must keep this one |
+| 6 | `I8508.AG` | Missing coordinates, but has a country (Uzbekistan) |
+| 7 | `I13976.SG` | Lowest coverage in the file (281 SNPs) |
+| 8 | `gun005.SG` | Canary Islands: must **not** appear when filtering for Spain |
+| 9 | `VK202.AG` | `Scotland_Viking`; also has no DOI |
+| 10 | `VK201.AG` | `Scotland_Viking-o`: the outlier test |
+
+Ten individuals cover every edge case we found. Several cover two at once (VK202 is both a Viking and a missing-DOI case), which keeps the list short.
+
+## Part C: Verify each one by hand
+
+### Why use a different tool
+
+So far, everything we know about these individuals came from pandas. If pandas had misread the file, for example by shifting a column, every check would agree with the same wrong answer. `grep` reads the raw text file directly, with no pandas involved. If the two tools agree, you can trust the values.
+
+### Column numbers shift by one
+
+pandas counts columns starting from **0**, but `cut` (the tool that picks out columns in the terminal) starts from **1**. So pandas column 0 is `cut` field 1, column 10 is field 11, and so on. Off-by-one mistakes like this are one of the most common bugs in data work, so it's worth seeing it once on purpose:
+
+| Value | pandas column | `cut` field |
+|---|---|---|
+| Genetic ID | 0 | 1 |
+| Individual ID | 2 | 3 |
+| Date (BP) | 10 | 11 |
+| Group ID | 14 | 15 |
+| Country | 16 | 17 |
+| Latitude | 17 | 18 |
+| SNPs hit (1240k) | 26 | 27 |
+| Publication | 6 | 7 |
+| DOI | 7 | 8 |
+
+### First individual: `Chimp.REF`
+
+Run this from the repo root:
+
+```bash
+grep -P "^Chimp\.REF\t" data/raw/v66.p1_1240K.aadr.PUB.anno | cut -f1,3,11,15,17,18,27,7,8
+```
+
+Piece by piece:
+
+- **`grep`** searches a file and prints every line that matches a pattern.
+- **`-P`** tells grep to use the same regular-expression style as Python, so `\t` means a tab.
+- **The pattern `"^Chimp\.REF\t"`** is built carefully, and it's a small example of the anchored matching we discussed:
+  - **`^`** means "at the very start of the line." The Genetic ID is the first field, so this matches only rows whose ID *begins* this way.
+  - **`\.`** matches a literal dot. In regular expressions, a plain `.` means "any character," so without the backslash the pattern could also match something like `ChimpXREF`.
+  - **`\t`** at the end requires a tab right after the ID. Without it, searching for `VK20` would match both `VK201` and `VK202`. The tab guarantees you match the whole ID and nothing longer.
+- **`|`** is a **pipe**. It sends grep's output straight into the next command instead of printing it.
+- **`cut -f1,3,...`** keeps only the listed fields. Tabs separate the columns, which is `cut`'s default. Note that `cut` always prints fields in their original order, no matter what order you list them in.
+
+Compare the output to the pandas results above. The ID, date, group, and coverage should match exactly.
+
+### Second individual: `YCH017`, the multi-row person
+
+Here you're checking a *count*, not a single row: does this person really have 11 rows, and is `YCH017.AG` the one with the most SNPs?
+
+```bash
+awk -F'\t' '$3 == "YCH017"' data/raw/v66.p1_1240K.aadr.PUB.anno | cut -f1,27
+```
+
+- **`awk`** is another text-processing tool. Unlike grep, it understands columns.
+- **`-F'\t'`** tells awk the columns are separated by tabs.
+- **`'$3 == "YCH017"'`** keeps lines where field 3 (Individual ID) is exactly `YCH017`. Because it's an exact comparison on one specific column, it can't accidentally match `YCH0170` or a group name that contains the same letters.
+- **`cut -f1,27`** shows just the Genetic ID and SNP count.
+
+You should see 11 lines, with `YCH017.AG` having the highest number (1,064,203).
+
+To count the lines instead of reading them, add `| wc -l` to the end of the command. That pipes the output into the same line counter you used on the whole file earlier.
+
+### The other eight
+
+Use the `grep` command from `Chimp.REF` for each remaining individual, changing only the ID. Remember to put `\.` before each dot, and keep the `^` and `\t`:
+
+- `Khwit\.SG`
+- `JHF05\.AG`
+- `NA20813\.DG`
+- `I8508\.AG`
+- `I13976\.SG`
+- `gun005\.SG`
+- `VK202\.AG`
+- `VK201\.AG`
+
+Paste all ten outputs, plus the `YCH017` result. Once we've confirmed they match the pandas values, we'll save them as your official expected-values file for the tests.

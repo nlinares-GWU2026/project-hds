@@ -77,6 +77,6 @@ Filter : Publication | Columns: 5 First publication (abbrev. earliest paper that
 **Publications:** Every row has a publicaiton label - no missing values from 5 or 6. 647 rows have no DOI - export can only give the label. 2781 rows have a different first publication. So the export should list both columns (paper that first reported the individual and the individual paper for this version of data). *Some labels are not published papers so they should be flagged accordingly.* **The labels are inconsistent so they are just names and not structured citations. So DOI should be the main identifier in the export with the label as the fallback.** Many names contain non-English characters, **so aadrkit must use UTF-8 encoding explicitly.**
 ** 358 unique publicaitons**
 ### Current:
-9. Choosing test individuals
+9. Choosing test individuals: Already have 1. reference gnome `Chimp.REF` (must be excluded from present-day and ancient selections by default), 2. Post-1950 date `Kwhit.Sg` (only negative date), 3. Present day/Unusual data type `JHF05.AG` (present-day but captured with an ancient method), 4. Person with many rows `YCH017` (deduplication). Still need: missing coordinates, very low coverage, Canary Islands (that AADR lists separately from Europe), a "Viking" group (group matching pattern), a standard present day individual, an "unpublished" row, and a row with a missing DOI. --> `find_test_indiv.py`
 
 
