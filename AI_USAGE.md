@@ -460,4 +460,173 @@ Run it and paste just the two new sections. Your prompt also shows `main ✗`, w
 - **What I was doing:** Choosing test individuals so I could verify the tool against expected output especially with the tricky cases I discovered during profiling the `.anno` data. 
 - **What I asked (verbatim):** Can you help me write a script to choose test individuals to verify against the tool's output that covers the tricky cases I found during the profiling: 1. present-day (0 BP), 2. reference genome (like `Chimp.REF`), 3. the one post-1950 individual (-4 BP), 4. someone with missing coordinates, 5. someone with low coverage, 6. someone from a place AADR lists separately (Canary Islands), 7. Someone whose group matches a pattern like "Viking, 8. a person with several rows. First check duplicates and publications to see how often one person appears in several rows before choosing test. Next, choose individuals. Finally, verify each one by hand with `grep` and record expected  values. 
 - **Exact output (verbatim):**
-- **Verificaiton:**
+
+### Step 3 has three parts
+
+- **A.** Check duplicates and publications (finishing Step 2). You need to know how often one person appears in several rows before you can choose test individuals.
+- **B.** Choose the individuals, using everything learned so far.
+- **C.** Verify each one by hand with `grep`, and record the expected values.
+
+### Part A: Duplicates and publications
+
+Create a new file, `scripts/profile_ids.py`. It gets its own file because `profile_anno.py` is already long, and keeping each script focused on one question makes your exploration easier to follow later.
+
+```python
+from pathlib import Path
+import pandas as pd
+
+ROOT = Path(__file__).resolve().parent.parent
+anno = pd.read_csv(ROOT / "data" / "raw" / "v66.p1_1240K.aadr.PUB.anno",
+                   sep="\t", low_memory=False, na_values=[".."])
+
+# --- Duplicates: can one person have several rows? ---
+genetic_id = anno.iloc[:, 0]
+individual_id = anno.iloc[:, 2]
+print("Rows:", len(anno))
+print("Unique Genetic IDs:", genetic_id.nunique())
+print("Unique Individual IDs:", individual_id.nunique())
+
+rows_per_person = individual_id.value_counts()
+print("\nNumber of people with 1, 2, 3... rows:")
+print(rows_per_person.value_counts().sort_index())
+
+example = rows_per_person.index[0]
+print("\nThe person with the most rows:")
+print(anno.loc[individual_id == example].iloc[:, [0, 2, 14, 21, 26]].to_string())
+
+# --- Publications: what the citation export would draw on ---
+first_pub = anno.iloc[:, 5]
+pub = anno.iloc[:, 6]
+doi = anno.iloc[:, 7]
+print("\nMissing first publication:", first_pub.isna().sum())
+print("Missing publication:", pub.isna().sum())
+print("Missing DOI:", doi.isna().sum())
+both_present = first_pub.notna() & pub.notna()
+print("Rows where first publication differs:", ((first_pub != pub) & both_present).sum())
+print("Unique publications:", pub.nunique())
+```
+
+### Line-by-line explanation
+
+**Loading**
+- **`na_values=[".."]`** is new. It's the first design decision from your notes, put into practice. pandas now treats `".."` as missing from the start, so `isna()` counts it automatically, without the separate `== ".."` check we used before.
+
+**Duplicates**
+- **`genetic_id` and `individual_id`** hold columns 0 and 2. Column 0 is the ID for one *dataset*, meaning one set of genotype data. Column 2 appears to be the ID for the *person*. If one person was sequenced more than once, for example with both capture and shotgun methods, they'd have one Individual ID but several Genetic IDs.
+- **Comparing the unique counts** tells you whether that happens:
+  - If unique Genetic IDs equals the number of rows, every row is a separate dataset.
+  - If unique Individual IDs is *smaller* than the number of rows, some people appear more than once.
+- **`rows_per_person.value_counts().sort_index()`** is a count of counts. The first `value_counts()` gives each person's number of rows. The second counts how many people have 1 row, how many have 2, and so on. `sort_index()` puts that list in order (1, 2, 3...).
+- **`example`** is the person with the most rows, since `value_counts()` sorts from most to fewest. Printing their rows with the ID, group, data type, and SNP columns (0, 2, 14, 21, 26) shows what a multi-row person actually looks like. For example, do the rows differ only in data type and coverage?
+
+**Publications**
+- **The three `isna()` counts** show how complete each publication column is. Any gaps would affect the citation export.
+- **`both_present`** handles a pandas quirk: a missing value is never considered equal to anything, not even another missing value. Without this check, every row with a missing publication would be counted as "different." `&` requires both columns to have a value before we compare them.
+- **"Rows where first publication differs"** tells you whether the citation export needs both columns. If this is 0, one column is enough. If it's large, the export should probably list both papers for each individual.
+- **`pub.nunique()`** counts how many distinct papers the data comes from. That tells you how long a citation list could get.
+
+### Run it
+
+```bash
+python scripts/profile_ids.py
+```
+
+Paste the full output. From it, we'll decide how `aadrkit` should handle people with several rows and which publication columns the citation export needs. Then we'll move on to Part B, choosing your test individuals.
+- **Verificaiton:** I typed out the script, analyzed the results myself after running it in the terminal, and then pasted back the output in Claude for a second verification. 
+- **What I asked next (verbatim):** (pasted exact output of `profile_ids.py`) 
+- **Exact output (verbatim):** 
+The duplicates and publication checks were both worth doing. Each one changes the design.
+
+### Duplicates: one person can have many rows
+
+**Genetic ID is unique for every row** (23,089 IDs for 23,089 rows). That makes it the reliable key for identifying a specific dataset, and it's the ID `convertf` will use.
+
+**Individual ID is not unique.** There are only 21,433 different people, so about 1,650 rows are repeat appearances. Most people (20,171) have one row, 936 have two, and one person, `YCH017`, has eleven.
+
+`YCH017`'s rows show why. They're all the same individual from Late Classic Mexico, but they come from different datasets: `.AG` is 1240K capture and `.IM` is immune capture, plus several `_alt` and `_d` versions. I don't know exactly what `_alt` and `_d` mean, so that's another one to look up rather than guess. Their data quality varies hugely, from 7,796 SNPs up to 1,064,203 for `YCH017.AG`.
+
+**Why this matters:** most analyses need each person counted once. If someone appears twice in a subset, population statistics treat them as two separate people. A kinship analysis would see two "individuals" with identical DNA, which looks like identical twins. So `aadrkit` needs a **deduplication option: keep one row per person, choosing the row with the most SNPs (column 26)**. `aadr-subset` describes doing something similar, so this is also a natural point to compare the two tools later.
+
+Two decisions for you:
+
+1. **Should deduplication be on by default?** I'd suggest yes. Counting a person twice is a silent error most users won't notice, while turning deduplication off is a deliberate choice a researcher can make. This differs from the coverage threshold, where there's no single right default. Here, one answer is usually correct.
+2. **Filter first, then deduplicate.** Pick the best row among the rows that passed the user's filters. If you deduplicated first, you might keep a row that the filters then remove, and that person would disappear from the results entirely.
+
+`YCH017` makes a perfect test individual: after deduplication, only `YCH017.AG` should remain.
+
+### Publications: what the citation export can rely on
+
+- **Every row has a publication label.** No missing values in columns 5 or 6.
+- **647 rows have no DOI.** For those, the export can only give the label, and it should say so.
+- **2,781 rows (about 12%) have a different "first publication."** So the export should list **both** columns, the paper that first reported the individual and the paper for this version of the data.
+- **Some labels aren't published papers.** `Unpublished` and `FernandesMegalithic_Unpublished` are placeholders. Several others are preprints (`BioRxiv`, `ResSq`), which haven't completed peer review. The export should flag these rather than presenting them as ordinary citations.
+- **The labels are inconsistent**, so they're names, not structured citations. The same journal appears as both `NatComm` and `NatCommun`, both `SciAdv` and `ScienceAdvances`, and `MolBiolEvol` and `MolBioEvol`. One label (`StolarekFiglerowiczGenomeBiol`) has no year. So the **DOI should be the main identifier** in the export, with the label as a fallback.
+- **Many names contain non-English characters**: `Altınışık`, `Szécsényi-Nagy`, `Pääbo`, `Žegarac`. When `aadrkit` writes a citation file, it must use UTF-8 encoding explicitly. Otherwise, these names can be garbled on Windows, which uses a different default encoding. Since you work on Windows, you'd likely notice that bug.
+
+### Part B: Find your test-individual candidates
+
+Now we choose the 8–10 individuals. We already know several from earlier output:
+
+| Situation | Genetic ID | Why it's useful |
+|---|---|---|
+| Reference genome | `Chimp.REF` | Must be excluded from present-day and ancient selections by default |
+| Post-1950 date | `Khwit.SG` | The only negative date (−4 BP) |
+| Present-day, unusual data type | `JHF05.AG` | Present-day, but captured with an "ancient" method |
+| Person with many rows | `YCH017` | Deduplication must keep only `YCH017.AG` |
+
+We still need candidates for: missing coordinates, very low coverage, the Canary Islands, a Viking group, a standard present-day individual, an "Unpublished" row, and a row with a missing DOI.
+
+**Finding versus verifying:** using pandas to *find* candidates is fine. The independence rule applies to *verifying* their values, which you'll do in Part C with `grep`. Pandas helps you shop; `grep` checks the receipt.
+
+Create `scripts/find_candidates.py`:
+
+```python
+from pathlib import Path
+import pandas as pd
+
+ROOT = Path(__file__).resolve().parent.parent
+anno = pd.read_csv(ROOT / "data" / "raw" / "v66.p1_1240K.aadr.PUB.anno",
+                   sep="\t", low_memory=False, na_values=[".."])
+
+cols = [0, 2, 10, 14, 16, 17, 26]
+short = ["genetic_id", "individual_id", "date_bp", "group_id", "country", "lat", "snps_1240k"]
+view = anno.iloc[:, cols].set_axis(short, axis=1)
+
+def show(label, rows):
+    print(f"\n=== {label} ===")
+    print(rows.head(3).to_string())
+
+show("Missing coordinates", view[view["lat"].isna()])
+show("Lowest coverage", view.nsmallest(3, "snps_1240k"))
+show("Canary Islands", view[view["country"] == "Canary Islands"])
+show("Viking groups", view[view["group_id"].str.contains("Viking")])
+show("Present-day Tuscans (TSI)", view[view["group_id"] == "TSI"])
+show("Unpublished", view[anno.iloc[:, 6] == "Unpublished"])
+show("Missing DOI", view[anno.iloc[:, 7].isna()])
+```
+
+### Explanation
+
+**`view`** is a smaller version of the table with just seven columns, renamed to short names using `set_axis`, the same trick as before. From here on, you can write `view["country"]` instead of a column number or a very long name. This is very close to what the real package will do internally.
+
+**`def show(label, rows):`** defines a **function**: a reusable block of code with a name.
+- `label` and `rows` are its inputs.
+- The two indented lines are what it does: print a heading, then print the first three matching rows.
+- Without the function, you'd repeat those same two lines seven times. If you later wanted five rows instead of three, you'd change one line instead of seven. Functions are also exactly how `aadrkit` will be built: every filter will be a function like this.
+
+**Each `show(...)` line** asks one question:
+- **`view["lat"].isna()`** finds rows with no latitude. This works directly now because `na_values=[".."]` turned `".."` into a real missing value.
+- **`view.nsmallest(3, "snps_1240k")`** returns the three rows with the fewest SNPs. This is how you find the 281-SNP individual.
+- **`== "Canary Islands"`** and **`== "TSI"`** are exact matches.
+- **`.str.contains("Viking")`** finds any group name *containing* "Viking" anywhere. This is the simple version of the pattern matching we discussed for the population filter.
+- **The last two** use `anno.iloc[:, 6]` and `anno.iloc[:, 7]` (the publication and DOI columns). They aren't in `view`, but they're still in the same row order, so the matching works.
+
+**`head(3)`** inside `show` limits each section to three rows, so you get a short list of candidates, not hundreds of rows.
+
+Run it with `(aadr-project)` active:
+
+```bash
+python scripts/find_candidates.py
+```
+
+Paste the output. Then we'll pick one individual from each section and put together your final list of test individuals.
