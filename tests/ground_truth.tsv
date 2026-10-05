@@ -1,0 +1,11 @@
+genetic_id	individual_id	publication	doi	date_bp	group_id	country	lat	snps_1240k
+Chimp.REF	Chimp	Unpublished	..	0	Chimp	..	..	1102442
+Khwit.SG	Khwit	MargaryanGilbertAdvGenet2021	https://doi.org/10.1002/ggn2.10051	-4	Georgia_Tkhina_20thCentury	Georgia	..	1113084
+JHF05.AG	JHF05	McCollWillerslevScience2018	https://doi.org/10.1126/science.aat3628	0	Malaysia_Jehai	Malaysia	4.5921	1150339
+NA20813.DG	NA20813	The1000GenomesProjectConsortiumNature2015	https://doi.org/10.1038/nature15393	0	TSI	Italy	40.00001	1101664
+YCH017.AG	YCH017	BarqueraKrauseNature2024	https://doi.org/10.1038/s41586-024-07509-7	1075	Mexico_LateClassic	Mexico	20.683056	1064203
+I8508.AG	I8508	NarasimhanReichScience2019	https://doi.org/10.1126/science.aat7487	6356	Uzbekistan_N	Uzbekistan	..	16278
+I13976.SG	I13976	LipsonPrendergastNature2022	https://doi.org/10.1038/s41586-022-04430-9	18500	Tanzania_LSA	Tanzania	-7.59	281
+gun005.SG	gun005	Rodríguez-VarelaGirdland-FlinkCurrBiol2017	https://doi.org/10.1016/j.cub.2017.09.059	992	Canary_Guanche	Canary Islands	27.966667	379128
+VK202.AG	VK202	AkbariReichNature2026	..	1000	Scotland_Viking	United Kingdom	59.1341	810231
+VK201.AG	VK201	AkbariReichNature2026	..	1460	Scotland_Viking-o	United Kingdom	59.1341	666641

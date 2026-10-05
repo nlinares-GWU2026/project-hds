@@ -630,7 +630,7 @@ python scripts/find_candidates.py
 ```
 
 Paste the output. Then we'll pick one individual from each section and put together your final list of test individuals.
-- **What I asked next (verbatim):** Pasted the output of `find_test_indiv.py`. I want to use the following individuals "Chimp.REF" (ref genome), "Khwit.SG" (post-1950 date), "JHF05.AG" (present day individual with "ancient" data method), "NA20813.DG" (standard present-day individual), "YCH017.AG" (person with 11 rows), "I8508.AG" (missing coordinate but has a country Uzbekistan), "I13976.SG" (lowest coverage), "gun005.SG" (for the Canary Island that should not appear as Spain), "VK202.AG" (for both no DOI and the outlier test)
+- **What I asked next (verbatim):** Pasted the output of `find_test_indiv.py`. "I want to use the following individuals "Chimp.REF" (ref genome), "Khwit.SG" (post-1950 date), "JHF05.AG" (present day individual with "ancient" data method), "NA20813.DG" (standard present-day individual), "YCH017.AG" (person with 11 rows), "I8508.AG" (missing coordinate but has a country Uzbekistan), "I13976.SG" (lowest coverage), "gun005.SG" (for the Canary Island that should not appear as Spain), "VK202.AG" (for both no DOI and the outlier test). I want to test finding these against pandas with regex using the grep function so they are verifiable to be accurate pulls."
 - **Exact output (verbatim):**
 Every section turned up a good candidate, and a couple of them revealed something new. First the new finding, then your final list, then Part C.
 
@@ -744,3 +744,222 @@ Use the `grep` command from `Chimp.REF` for each remaining individual, changing 
 - `VK201\.AG`
 
 Paste all ten outputs, plus the `YCH017` result. Once we've confirmed they match the pandas values, we'll save them as your official expected-values file for the tests.
+- **Verification:** I ran all the grep regex commands on the individuals that I had chosen per Claude's instructions, saved the outputs and made notes on them for my future script, and copied them into the Claude discussion. I also independently verified that the "-o" was indeed the updated version of the "_o" that stands for outliers via https://genarchivist.net/showthread.php?tid=2500 and the AADR paper (Mallick et al., 2024) itself. 
+-**What I asked next (verbatim):** (pasted the output from the regex searches from my terminal) + "All 10 searches were successful, but now I am confused on how to handle the "-o" outlier. I looked up the documentation of the AADR outlier and this was what I found. "The group name may include a suffix that mark individuals such as potentially contaminated (“_contam”), or as a population genetic outlier (“_o”), or as having relatively little data (low coverage – “lc”)" from https://pure.mpg.de/rest/items/item_3570895_1/component/file_3570896/content as well as "Group ID naming convention changed entirely. v62 appended data type
+  suffixes to group names (e.g. ACB.DG, Adygei.DG), v66 dropped them
+  (just ACB, Adygei). Also various _o -> -o and other normalization
+  changes, making direct group name comparison unreliable." from a forum on AADR v66 https://genarchivist.net/showthread.php?tid=2500. So it is confirmed they are outliers. How can the selection filter handle the outliers, possible contaminated sequences, and possible low coverage from the suffixes the paper listed? Also, would you be able to provide me a command to save all of these test subjects and their outputs to my repo?"
+  - **Exact output (verbatim):**  
+  All ten match the pandas output exactly, and your outlier research did more than confirm the guess.
+
+### Verification: all ten match
+
+| Genetic ID | Date | Group | Country | Lat | SNPs | Matches pandas? |
+|---|---|---|---|---|---|---|
+| `Chimp.REF` | 0 | Chimp | missing | missing | 1,102,442 | ✓ |
+| `Khwit.SG` | −4 | Georgia_Tkhina_20thCentury | Georgia | missing | 1,113,084 | ✓ |
+| `JHF05.AG` | 0 | Malaysia_Jehai | Malaysia | 4.5921 | 1,150,339 | ✓ |
+| `NA20813.DG` | 0 | TSI | Italy | 40.00001 | 1,101,664 | ✓ |
+| `YCH017` | — | — | — | — | 11 rows, `.AG` highest (1,064,203) | ✓ |
+| `I8508.AG` | 6356 | Uzbekistan_N | Uzbekistan | missing | 16,278 | ✓ |
+| `I13976.SG` | 18500 | Tanzania_LSA | Tanzania | −7.59 | 281 | ✓ |
+| `gun005.SG` | 992 | Canary_Guanche | Canary Islands | 27.966667 | 379,128 | ✓ |
+| `VK202.AG` | 1000 | Scotland_Viking | United Kingdom | 59.1341 | 810,231 | ✓ |
+| `VK201.AG` | 1460 | Scotland_Viking-o | United Kingdom | 59.1341 | 666,641 | ✓ |
+
+Two independent tools agree, so you can trust these values.
+
+A few details to know:
+
+- **`Malaysia4.5921` isn't a missing tab.** The terminal lines columns up at fixed tab positions, and a long value like "Malaysia" can run right into the next column visually. The tab is still there in the file. Similarly, `cu` / `t` splitting across lines is just your terminal wrapping a long command.
+- **`Khwit.SG` also has missing coordinates.** That's new information, since our earlier pandas view of it didn't include latitude. It now covers two edge cases at once.
+- **`gun005.SG` printed `Rodríguez` correctly**, which confirms the file's special characters read cleanly in your terminal.
+- **VK201 and VK202 both have no DOI** for `AkbariReichNature2026`. My guess is the paper is recent enough that the DOI hadn't been added to the metadata yet, but that's only a guess. Either way, it's a realistic case for the citation export to handle.
+
+### Your outlier research
+
+This is a strong piece of verification, and it found something important: **the documentation and the data disagree.**
+
+- **The paper** describes outlier suffixes written with an underscore (`_o`), plus `_contam` for possibly contaminated individuals and `lc` for low coverage.
+- **The v66 data** writes it with a hyphen (`Scotland_Viking-o`, `Altaian-o`).
+- **The forum post** explains why: v66 changed `_o` to `-o`, dropped data-type suffixes from group names, and normalized other naming. Group names can't be reliably compared across versions.
+
+Notice how you established this. The forum is a community source, not peer-reviewed, so on its own it would be weak evidence. But its claim matches what you directly observed in the data, and the paper explains what the suffix *means*. Three sources agreeing is much stronger than any one alone. Describe that reasoning explicitly in your report's methods.
+
+It also reinforces two earlier decisions:
+
+- **Pinning v66.p1 was necessary.** A filter written against the paper's `_o` convention would silently miss every v66 outlier.
+- **The suffix rules belong in one clearly documented place in the code**, tied to the pinned version, so a future AADR release with different conventions is easy to handle.
+
+**A design decision this raises:** with `-o`, `_contam`, and `lc` all in play, the population filter could offer explicit options like "include outliers" or "include possibly contaminated individuals," rather than leaving it to whichever matching mode the user picks. Before deciding, it's worth counting how many groups actually use each suffix in v66, since the paper's conventions may not all have survived the renaming. That's a quick check for after this step.
+
+### Save the ground truth file
+
+Now we record these values as the expected answers your tests will check against. Since they come straight from `grep`, they stay independent of pandas.
+
+**1. Create a `tests` folder:**
+
+```bash
+mkdir -p tests
+```
+
+`pytest` looks for tests in a folder named `tests` by convention, so the expected values will sit right next to the tests that use them.
+
+**2. Write the header row:**
+
+```bash
+printf 'genetic_id\tindividual_id\tpublication\tdoi\tdate_bp\tgroup_id\tcountry\tlat\tsnps_1240k\n' > tests/ground_truth.tsv
+```
+
+- **`printf`** prints text exactly as written, with `\t` becoming a tab and `\n` a line break.
+- **The header uses your short column names, in the order `cut` prints the fields** (1, 3, 7, 8, 11, 15, 17, 18, 27). As we noticed, `cut` always outputs fields in their original file order, so the header has to follow that order.
+- **`>` works here** because the file doesn't exist yet, so `noclobber` doesn't block it.
+
+**3. Add all ten individuals with one loop.** This is a single command, so paste it as one line:
+
+```bash
+for id in 'Chimp\.REF' 'Khwit\.SG' 'JHF05\.AG' 'NA20813\.DG' 'YCH017\.AG' 'I8508\.AG' 'I13976\.SG' 'gun005\.SG' 'VK202\.AG' 'VK201\.AG'; do grep -P "^${id}\t" data/raw/v66.p1_1240K.aadr.PUB.anno | cut -f1,3,7,8,11,15,17,18,27 >> tests/ground_truth.tsv; done
+```
+
+- **`for id in ...; do ...; done`** is a bash loop. It runs the same `grep | cut` command once for each ID in the list, setting `id` to each value in turn. It's the terminal version of the Python `for` loops you've been writing.
+- **`${id}`** inserts the current ID into the pattern, so each pass searches `^Chimp\.REF\t`, then `^Khwit\.SG\t`, and so on.
+- **The single quotes** around each ID keep the `\.` backslashes intact.
+- **`>>`** appends each result to the end of the file instead of replacing it, and `noclobber` allows appending.
+- **`YCH017.AG`** is the only `YCH017` row saved, because it's the row deduplication should keep. The fact that `YCH017` has 11 rows in total belongs in your notes.
+
+**4. Check the result:**
+
+```bash
+cat tests/ground_truth.tsv
+```
+
+```bash
+wc -l tests/ground_truth.tsv
+```
+
+You should see the header plus ten rows, so `wc -l` should report **11**. Missing values will still appear as `..`, which is correct: it's the raw truth from the file. The tests will treat `..` as missing, exactly the way the loader does.
+
+A note on your redistribution promise: ten rows with nine fields each is a tiny test fixture, not a copy of the dataset. Your commitment not to redistribute AADR still holds. These values come from AADR v66.p1.
+
+**5. Commit:**
+
+```bash
+git add tests/ground_truth.tsv AI_USAGE.md docs/anno_notes.md
+```
+
+```bash
+git commit -m "Add hand-verified ground truth individuals for tests"
+```
+
+Paste the `cat` output so we can confirm the file looks right. Then we'll do the quick suffix count, and after that we'll move on.
+- **What I asked next:** (pasted the cat result of `ground_truth.tsv` and the line count.) "All 11 lines (including header) had 9 fields so it populated correctly. Can you write me a script to count the different suffixes?"
+- **Exact output (verbatim):** 
+The file looks right: a header plus ten rows, and `wc -l` reports 11. The values for `YCH017.AG` also show up in full for the first time (1075 BP, `Mexico_LateClassic`, Mexico), which fills in its row.
+
+Commit:
+
+```bash
+git add tests/ground_truth.tsv AI_USAGE.md docs/anno_notes.md
+```
+
+```bash
+git commit -m "Add hand-verified ground truth individuals for tests"
+```
+
+### Quick check: which group-name suffixes actually exist in v66?
+
+Your research found that the paper describes `_o`, `_contam`, and `lc`, while v66 uses `-o`. Before designing options around these suffixes, let's see which ones actually appear. Create `scripts/count_suffixes.py`:
+
+```python
+from pathlib import Path
+import pandas as pd
+
+ROOT = Path(__file__).resolve().parent.parent
+anno = pd.read_csv(ROOT / "data" / "raw" / "v66.p1_1240K.aadr.PUB.anno",
+                   sep="\t", low_memory=False, na_values=[".."])
+
+groups = pd.Series(anno.iloc[:, 14].unique())
+
+for s in ["-o", "_o", "contam", "lc"]:
+    hits = groups[groups.str.contains(s, regex=False)]
+    print(f"\n=== '{s}': {len(hits)} groups ===")
+    print(hits.head(10).to_string(index=False))
+```
+
+### Explanation
+
+- **`anno.iloc[:, 14].unique()`** returns each group name once, all 3,897 of them. We're counting *groups*, not people, because suffixes are part of the group name.
+- **`pd.Series(...)`** wraps the result back into a pandas Series. `.unique()` returns a plain array, which doesn't have pandas' text tools, and wrapping it gives us `.str.contains()` again.
+- **`regex=False`** tells pandas to search for the text literally. Without it, pandas would treat the search text as a regular expression, where some characters have special meanings. Literal search keeps this check simple.
+- **`len(hits)`** is how many groups contain that text, and **`head(10)`** shows up to ten examples.
+- **`to_string(index=False)`** prints just the names, without row numbers.
+
+### What to expect
+
+This search is deliberately naive. It finds the text **anywhere** in a group name, not just as a suffix at the end. So read the examples, not just the counts:
+
+- If **`lc`** shows names like `Chalcolithic` (the Copper Age, which contains "lc" in the middle), those aren't low-coverage markers. That's a false positive, and it shows exactly why the real filter needs precise rules instead of simple "contains" searches.
+- If **`_o`** shows nothing or only unrelated matches, that supports the forum's point that v66 replaced `_o` with `-o`.
+- **`-o`** should show the outlier groups we've already seen, like `Scotland_Viking-o`.
+
+Run it:
+
+```bash
+python scripts/count_suffixes.py
+```
+
+Paste the output, and we'll work out exactly what the suffix rules should be. That's the last piece of the population-filter design.
+- **Verification:** I manually inspected the results and logically thought about the output. I pasted the results into Claude mentioning why contamination was zero "Why would contam be zero? Could it be in a quality column? Also, it appears the "lc" picked up two names with lc but no lc suffixes. The final regex rule would include only outliers and the full base group?" for a final check and it responded with: 
+- **Exact output (verbatim):**
+This settles the suffix question cleanly. Only one suffix matters in v66, and the naive search turned up exactly the kind of false positive we expected.
+
+## What each result means
+
+**`-o`: 499 groups**, about 13% of all 3,897. That's a lot of outlier groups, so this definitely needs proper handling. The examples also show what comes *after* the `-o`:
+
+- `England_BellBeaker-ohighEEF` and `England_BellBeaker-olowEEF`
+- `Bulgaria_Samovodene_EarlyMedieval-oEastAsia`
+- `England_EarlyMedieval_Saxon-o` (nothing after)
+
+The text after `-o` describes **how** the individual differs from their group. EEF stands for Early European Farmer ancestry. So `-ohighEEF` means "an outlier with more farmer ancestry than the rest of the group," and `-oEastAsia` means "an outlier with East Asian-related ancestry." It's a useful detail for your report, because it shows these labels encode scientific findings, not just tags.
+
+**`_o`: 0 groups.** This confirms the forum post: v66 replaced the underscore form with the hyphen. The paper's convention doesn't apply to this version.
+
+**`contam`: 0 groups.** v66.p1 doesn't mark contamination in group names. Contamination appears to be tracked in the quality columns instead. Column 48's description talks about contamination estimates in detail, so the quality filter would cover it.
+
+**`lc`: 2 groups, both false positives.**
+- `Peru_Cullcunche_Tiwanaku` matches only because "Cul**lc**unche" contains those letters.
+- `Ulchi` is a present-day population name.
+
+Neither is a low-coverage marker. This is exactly the over-matching problem we predicted, and it's why the real filter needs a precise rule. Low coverage is already handled by the SNP-count column anyway.
+
+## The suffix rule for `aadrkit`
+
+Since `-o` is the only suffix that matters, the rule can be precise: **an outlier group is one whose name ends with `-o` followed by any text that doesn't contain an underscore.** As a regular expression:
+
+```
+-o[^_]*$
+```
+
+Piece by piece:
+
+- **`-o`** matches the literal hyphen and "o".
+- **`[^_]*`** means "any number of characters, as long as none is an underscore." The `^` inside square brackets means NOT. So it matches `highEEF`, `EastAsia`, or nothing at all, but it can't reach back into earlier parts of the name, which are separated by underscores.
+- **`$`** means "at the very end of the name." Combined with the rest, this ensures `-o` is in the final section of the name, not somewhere in the middle.
+
+The **base group** is then whatever comes before the `-o`. For example, `England_BellBeaker-ohighEEF` becomes `England_BellBeaker`. That gives the population filter a clean design:
+
+- A user asks for `England_BellBeaker`.
+- By default, the tool returns only that exact group, **excluding outliers**, and prints a message like "12 outlier individuals excluded; use `include_outliers` to keep them." It's the same transparency principle as the missing-coordinates message.
+- With `include_outliers=True`, it also returns every group whose base name matches, such as `-ohighEEF` and `-olowEEF`.
+
+Excluding by default makes sense here because it's also what exact matching naturally does, so the default isn't hiding anything. It just matches what the user typed. And outliers are included only when someone asks for them.
+
+When you implement this, check the regular expression against this script's naive count. If both find 499 groups, the precise rule agrees with the simple search on this version. If they differ, look at the groups in the difference. Your test pair already covers it: VK201 (`Scotland_Viking-o`) must be recognized as an outlier, and VK202 (`Scotland_Viking`) must not.
+
+
+```bash
+git commit -m "Count group-name suffixes; define outlier rule for v66"
+```
+
+**That completes Steps 2 and 3.** You now know the metadata well enough to design every filter, and you have ten hand-verified individuals to test against.

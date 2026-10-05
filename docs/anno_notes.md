@@ -76,7 +76,22 @@ Filter : Publication | Columns: 5 First publication (abbrev. earliest paper that
 **Genetic ID is unique for every row (23,089 IDs for 23,089 rows) which makes it the reliable key for identifying a specific dataset and it is the ID `convertf` will use. Individual ID is not unique (21,433 different people so about 1650 rows are repeat appearances), most people (20,171) have one row, 936 have two, and one person, YCH017, has 11 (YCH017's rows show why. They're all the same individual from Late Classic Mexico, but they come from different datasets: .AG is 1240K capture and .IM is immune capture, plus several _alt and _d versions. I don't know exactly what _alt and _d mean, so that's another one to look up rather than guess. Their data quality varies hugely, from 7,796 SNPs up to 1,064,203 for YCH017.AG). DEDUPLICATION SHOULD BE ON BY DEFAULT AND FILTER FIRST THEN DEDUPLICATE.**
 **Publications:** Every row has a publicaiton label - no missing values from 5 or 6. 647 rows have no DOI - export can only give the label. 2781 rows have a different first publication. So the export should list both columns (paper that first reported the individual and the individual paper for this version of data). *Some labels are not published papers so they should be flagged accordingly.* **The labels are inconsistent so they are just names and not structured citations. So DOI should be the main identifier in the export with the label as the fallback.** Many names contain non-English characters, **so aadrkit must use UTF-8 encoding explicitly.**
 ** 358 unique publicaitons**
-### Current:
-9. Choosing test individuals: Already have 1. reference gnome `Chimp.REF` (must be excluded from present-day and ancient selections by default), 2. Post-1950 date `Kwhit.Sg` (only negative date), 3. Present day/Unusual data type `JHF05.AG` (present-day but captured with an ancient method), 4. Person with many rows `YCH017` (deduplication). Still need: missing coordinates, very low coverage, Canary Islands (that AADR lists separately from Europe), a "Viking" group (group matching pattern), a standard present day individual, an "unpublished" row, and a row with a missing DOI. --> `find_test_indiv.py`
-
-
+## Current:
+9. Choosing test individuals: Already have 1. reference gnome `Chimp.REF` (must be excluded from present-day and ancient selections by default), 2. Post-1950 date `Kwhit.Sg` (only negative date), 3. Present day/Unusual data type `JHF05.AG` (present-day but captured with an ancient method), 4. Person with many rows `YCH017` (deduplication). Still need: missing coordinates, very low coverage, Canary Islands (that AADR lists separately from Europe), a "Viking" group (group matching pattern), a standard present day individual, an "unpublished" row, and a row with a missing DOI. --> `find_test_indiv.py`. Then followed the grep regex commands per Claude's help to verify that they were individually findable, not jut through pandas. (From AADR v66.p1)
+```
+**Genetic ID	What it tests**
+1	Chimp.REF	Reference genome: excluded by default. Also "Unpublished," with no country or coordinates
+2	Khwit.SG	The only post-1950 date (−4 BP, 1954 CE)
+3	JHF05.AG	Present-day individual with an "ancient-style" data type (1240k)
+4	NA20813.DG	Standard present-day individual (TSI, Italy)
+5	YCH017.AG	Person with 11 rows: deduplication must keep this one
+6	I8508.AG	Missing coordinates, but has a country (Uzbekistan)
+7	I13976.SG	Lowest coverage in the file (281 SNPs)
+8	gun005.SG	Canary Islands: must not appear when filtering for Spain
+9	VK202.AG	Scotland_Viking; also has no DOI
+10	VK201.AG	Scotland_Viking-o: the outlier test
+``` 
+All were successful and information about the outlier, low coverage, and contamination suffixes was found. As a design decision, the population filter could offer explicigt options to include all of those different 3 options. But as a check before deciding on that I checked the suffixes: -o was 499 groups or about 13% of all 3897 which is a lot of outlier groups so it needs proper handling. The text after -o describes how the individual differs from their group. EEF = Early European Farmer with low or high ancestry tied to it. _o had 0 groups which confirmed that v66 replaced the underscore with the hyphen. The paper's convention does not apply to this version. contam had 0 groups. v66.p1 does not mark contamination in group names. Contamination appears to be in the quality columns so the quality filter would cover it. lc had 2 groups but both with false positives that just picked up the letters "lc" in an anctual population name. Low-coverage is handled by the SNP count column anyway. 
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+**Suffix Regex Rule: -o[^]*$**
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
