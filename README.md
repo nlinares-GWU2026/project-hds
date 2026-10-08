@@ -63,6 +63,33 @@ python scripts/profile_anno.py
 ```
 
 ## Repository Layout
+project-hds/
+├── docs/                                      # Project report, proposal, documentation, notes
+│   ├── Nicole_Linares_Proposal_HDS.pdf        # Individual project proposal
+│   ├── Linares_Dunkel-Bayogha_Proposal_HDS.pdf (REMOVE)
+│   ├── anno_notes.md                          # Dataset and project progress notes
+│   ├── data_checksums.md                      # Verification hashes (MD5/SHA256) to ensure raw data integrity
+│   └── lab1-addendum.md                       # Temporary lab submission addendum TO REMOVE AFTER SEMESTER 
+├── renv/                                      # R environment configuration files managed by the renv package                 
+│   ├── .gitignore                             # Prevents committing local renv library builds and binaries to Git
+│   ├── activate.R                             # R script that automatically initializes the project's renv environment
+│   └── settings.json                          # Configuration settings for renv project behaviors
+├── scripts/                                   # Executable Python scripts for data processing and analysis                  
+│   ├── count_suffixes.py                      # Utility script counting file extensions/suffixes across project files 
+│   ├── explore_anno.py                        # Exploratory script analyzing sample metadata in the annotation file
+│   ├── find_test_indiv.py                     # Script to locate representative test individuals for validation filtering
+│   ├── profile_anno.py                        # Main profiling script inspecting column missingness, data types, and value counts
+│   └── profile_ids.py                         # Script verifying unique individual IDs across AADR metadata files
+├── tests/                                     # Test suites and reference data used to validate code accuracy
+│   └── ground_truth.tsv                       # Reference dataset containing expected results to check filtering logic
+├── .Rprofile                                  # R startup script that auto-loads project settings and activates renv
+├── .gitignore                                 # Specifies intentional untracked files and folders to exclude from Git
+├── AI_USAGE.md                                # Documentation logging AI assistance and usage throughout the project
+├── Dockerfile                                 # Instructions to build a containerized environment reproducing the setup
+├── README.md                                  # Project documentation and setup (this file)
+├── environment.yml                            # Conda environment definition listing Python and system dependencies
+├── project-hds.Rproj                          # RStudio project file for organizing workspace settings
+└── renv.lock                                  Dependency lockfile tracking exact R package versions for reproducibility           
 
 ## Citation
 
