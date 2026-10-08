@@ -3,7 +3,7 @@
 
 ## Setup
 Terms: 
-- bash = your terminal (Git Bash, WSL, Command Prompt)
+- bash = Linux or macOS terminal. On Windows use WSL (Ubuntu); Git Bash and Command Prompt cannot run the conda environment or EIGENSOFT.
 - R console = terminal within RStudio or running R in a terminal to move into an R prompt
 - EIGENSOFT's `convertf` is required to read AADR's genotype files, and is only available after `conda activate aadr-project`. See `environment.yml`. 
 
@@ -14,7 +14,7 @@ git clone https://github.com/nlinares-GWU2026/project-hds.git
 cd project-hds
 mamba env create -f environment.yml
 conda activate aadr-project
-python scripts/profile_anno.py
+which convertf
 ```
 
 ### R (renv)
@@ -36,7 +36,7 @@ docker run --rm aadr-project
 
 This project uses the Allen Ancient DNA Resource (AADR), maintained by the Reich Lab at Harvard Medical School and distributed through the Harvard Dataverse (DOI: [10.7910/DVN/FFIDCW](https://doi.org/10.7910/DVN/FFIDCW)).
 
-- **Dataset version:** 14.0
+- **Dataset version:** 14.0 (contains AADR release v66.p1)
 - **File:** `v66.p1_1240K.aadr.PUB.anno` (1240K panel metadata, patch 1 of release v66)
 
 AADR data is not included in this repository. It is freely available with no access request required, so each user downloads their own copy. The `data/` directory and all AADR file types are listed in `.gitignore`.
@@ -55,6 +55,14 @@ sha256sum -c docs/data_checksums.txt
 Expected output: data/raw/v66.p1_1240K.aadr.PUB.anno: OK`. The file's MD5 checksum (`a2db1ac16f0f3558ed66fb251e1d5c7d`) also matches the value listed on its Dataverse page.
 
 [Download instructions for the genotype files (`.geno`, `.snp`, `.ind`) will be added when `convertf` integration begins.]
+
+## Check Everything Works
+In terminal:
+```bash
+python scripts/profile_anno.py
+```
+
+## Repository Layout
 
 ## Citation
 
