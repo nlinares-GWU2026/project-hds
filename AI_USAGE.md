@@ -670,7 +670,7 @@ A smaller observation: the Tuscan present-day individuals all have latitude `40.
 
 Ten individuals cover every edge case we found. Several cover two at once (VK202 is both a Viking and a missing-DOI case), which keeps the list short.
 
-## Part C: Verify each one by hand
+### Part C: Verify each one by hand
 
 ### Why use a different tool
 
@@ -913,7 +913,7 @@ Paste the output, and we'll work out exactly what the suffix rules should be. Th
 - **Exact output (verbatim):**
 This settles the suffix question cleanly. Only one suffix matters in v66, and the naive search turned up exactly the kind of false positive we expected.
 
-## What each result means
+### What each result means
 
 **`-o`: 499 groups**, about 13% of all 3,897. That's a lot of outlier groups, so this definitely needs proper handling. The examples also show what comes *after* the `-o`:
 
@@ -933,7 +933,7 @@ The text after `-o` describes **how** the individual differs from their group. E
 
 Neither is a low-coverage marker. This is exactly the over-matching problem we predicted, and it's why the real filter needs a precise rule. Low coverage is already handled by the SNP-count column anyway.
 
-## The suffix rule for `aadrkit`
+### The suffix rule for `aadrkit`
 
 Since `-o` is the only suffix that matters, the rule can be precise: **an outlier group is one whose name ends with `-o` followed by any text that doesn't contain an underscore.** As a regular expression:
 
