@@ -2,3 +2,6 @@
 ce9e13a990b26e29eadbb5630dfd2f706cff0aea7a5df59c8d7744346d7428b4  data/raw/v66.p1_1240K.aadr.patch.PUB.geno
 1189e253b82058822fddabc4966c1448dea70373a96c40106e720bedd93b55bf  data/raw/v66.p1_1240K.aadr.patch.PUB.snp
 c7500f8d337a42833d034800f989e1c6419855a6427769cc74de9d0a8bf76f98  data/raw/v66.p1_1240K.aadr.patch.PUB.ind
+ce9e13a990b26e29eadbb5630dfd2f706cff0aea7a5df59c8d7744346d7428b4  data/raw/v66.p1_1240K.aadr.patch.PUB.geno
+1189e253b82058822fddabc4966c1448dea70373a96c40106e720bedd93b55bf  data/raw/v66.p1_1240K.aadr.patch.PUB.snp
+c7500f8d337a42833d034800f989e1c6419855a6427769cc74de9d0a8bf76f98  data/raw/v66.p1_1240K.aadr.patch.PUB.ind
