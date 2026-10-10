@@ -1,0 +1,8 @@
+genotypename:    data/raw/v66.p1_1240K.aadr.patch.PUB.geno
+snpname:         data/raw/v66.p1_1240K.aadr.patch.PUB.snp
+indivname:       data/test_convertf/test.ind
+outputformat:    EIGENSTRAT
+genotypeoutname: data/test_convertf/test_out.geno
+snpoutname:      data/test_convertf/test_out.snp
+indivoutname:    data/test_convertf/test_out.ind
+hashcheck:       NO

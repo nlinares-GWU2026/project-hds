@@ -634,7 +634,7 @@ Paste the output. Then we'll pick one individual from each section and put toget
 - **Exact output (verbatim):**
 Every section turned up a good candidate, and a couple of them revealed something new. First the new finding, then your final list, then Part C.
 
-## A new finding: the `-o` suffix
+### A new finding: the `-o` suffix
 
 Look at these group names:
 
@@ -653,7 +653,7 @@ Whether outliers belong in a researcher's analysis is their scientific decision,
 
 A smaller observation: the Tuscan present-day individuals all have latitude `40.00001`. That looks like an approximate location for the population, not an exact sampling site, so don't build tests that depend on precise coordinates for present-day individuals.
 
-## Part B: Your test individuals
+### Part B: Your test individuals
 
 | # | Genetic ID | What it tests |
 |---|---|---|
@@ -963,3 +963,78 @@ git commit -m "Count group-name suffixes; define outlier rule for v66"
 ```
 
 **That completes Steps 2 and 3.** You now know the metadata well enough to design every filter, and you have ten hand-verified individuals to test against.
+
+## Entry 5
+- **Tool:** Claude (Opus 5.5)
+- **What I was doing:** Running a test on `convertf` 9.0.0 with a few test individuals to see if it reads the TGENO file correctly.
+- **What I asked (verbatim):** "Can you write a parameter file for the `.ind` file that tests `convertf` on a present day Tuscan with about 1 million SNPs, a Viking with about 800,000 SNPs, and the lowest coverage individual in the file? The file will go in data/`test_convertf`. 
+- **Exact output(verbatim):**
+### Make the modified `.ind`
+
+This creates a copy of the `.ind` where everyone except our three individuals is labeled `Ignore`:
+
+```bash
+awk '{ if ($1=="NA20813.DG" || $1=="VK202.AG" || $1=="I13976.SG") print $1, $2, $3; else print $1, $2, "Ignore" }' data/raw/v66.p1_1240K.aadr.patch.PUB.ind > data/test_convertf/test.ind
+```
+
+- **`if (...)`** checks whether column 1 is one of our three IDs.
+- **If yes,** `print $1, $2, $3` writes the line unchanged: ID, sex, real population.
+- **If no,** `print $1, $2, "Ignore"` writes the same ID and sex, but replaces the population with `Ignore`.
+- **The commas** in `print` put a single space between columns. The leading padding disappears, which is fine: `convertf` only needs whitespace between columns.
+- **`>`** saves the result as a new file. If you ever rerun this, use `>|` instead, since `noclobber` will refuse to overwrite the existing file.
+
+**Why relabel instead of deleting lines?** The `.geno` file stores genotypes in the same order as the `.ind` lines. Line 1 of the `.ind` is the first person in the `.geno`, line 2 the second, and so on. If you deleted lines, every person after the gap would be matched to the wrong genotypes, with no error message. Relabeling keeps every line in place, so the order stays intact.
+
+Check the result two ways:
+
+```bash
+grep -v "Ignore" data/test_convertf/test.ind
+```
+
+**`grep -v`** prints lines that *don't* match, so this should show exactly our three individuals.
+
+```bash
+wc -l data/test_convertf/test.ind
+```
+
+This must still say **23,089**. If it's any lower, a line was lost and the order is broken.
+
+### Write the parameter file
+
+Create `scripts/convertf_test.par` in VS Code. It belongs in `scripts/` and gets committed: it's a record of exactly how you ran the test, and it contains settings, not data.
+
+```
+genotypename:    data/raw/v66.p1_1240K.aadr.patch.PUB.geno
+snpname:         data/raw/v66.p1_1240K.aadr.patch.PUB.snp
+indivname:       data/test_convertf/test.ind
+outputformat:    EIGENSTRAT
+genotypeoutname: data/test_convertf/test_out.geno
+snpoutname:      data/test_convertf/test_out.snp
+indivoutname:    data/test_convertf/test_out.ind
+hashcheck:       NO
+```
+
+Two details:
+
+- **The output names end in `_out`.** If `indivoutname` were the same file as `indivname`, `convertf` would overwrite its own input while reading it. Ending each name with `.geno`, `.snp`, or `.ind` also means your `.gitignore` patterns cover them.
+- **The paths are relative to the repo root**, so always run `convertf` from `project-hds`, not from inside `scripts/` or `tests/`.
+
+### Run it and time it
+
+From the repo root, with `(aadr-project)` showing:
+
+```bash
+time convertf -p scripts/convertf_test.par 2>&1 | tee data/test_convertf/convertf.log
+```
+
+- **`time`** measures how long the command takes. This is the speed test for whether keeping the data on `/mnt/c` is fast enough.
+- **`2>&1`** sends error messages to the same place as regular output, so nothing gets lost.
+- **`| tee data/test_convertf/convertf.log`** shows the output on screen *and* saves a copy to a log file. If something goes wrong, you'll have the full message to look at.
+
+**What to expect:**
+
+- **If TGENO isn't supported,** `convertf` should fail almost immediately with an error about the genotype file or its format.
+- **If it works,** it will run for a while, since it has to read through the 6.7 GB file, then print a summary including how many individuals and SNPs it wrote out. We want to see **3 individuals**.
+
+Paste the output, especially the last 20 or so lines and the `real` time that `time` prints at the end. That tells us whether it works as planned.
+- **Verification:**
