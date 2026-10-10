@@ -1037,4 +1037,133 @@ time convertf -p scripts/convertf_test.par 2>&1 | tee data/test_convertf/convert
 - **If it works,** it will run for a while, since it has to read through the 6.7 GB file, then print a summary including how many individuals and SNPs it wrote out. We want to see **3 individuals**.
 
 Paste the output, especially the last 20 or so lines and the `real` time that `time` prints at the end. That tells us whether it works as planned.
-- **Verification:**
+- **Verification:** I ran all commands, created the parameter file, and inspected the result. The TGENO file worked correctly in `real    1m18.590s`. Interpreting the results, I sae that the `records read: 3` (my 3 individuals), `before compress: ... 23089` (correct, the total number of individuals), `after compress: ... 3`, `numsnps output: 1233013` (kept all SNPs). I then inspected the `test_out.ind` file to confirm which individuals appeared "VK202.AG M Scotland_Viking, NA20813.DG F TSI, I13976.SG F Tanzania_LSA" (correct) and the `test_out.geno` file for 3 digits per line and 1,233,013 SNPs per person. Additionally I checked each person's genotype against the `.anno` file (). The numbers for 0's 1's and 2's (remembering that pseudohaploid means 0 1's for ancient individuals) matched up to the expected counts of 281, 810,231, and 1,101,664.
+
+## Entry 6
+- **Tool:** Claude (Opus 5.5)
+- **What I was doing:** Creating the project package for `aadrkit`
+- **What I asked (verbatim):** Can you help me creat an `__init__.py` file and a `pyproject.toml` file for `aadirkit`? And test it correctly?"
+- **Exact output (verbatim):**
+
+### Install pytest and pin its version
+
+`pytest` is the testing tool. Install it into your environment:
+
+```bash
+mamba install -n aadr-project -c conda-forge pytest
+```
+
+Then see which version you got:
+
+```bash
+conda list pytest
+```
+
+Add it to `environment.yml` with that exact version, the same way you pinned EIGENSOFT, for example `- pytest=X.Y.Z`. "Install it, then pin what you actually got" means you never guess a version number, and your environment file always describes something you've tested.
+
+### Create the package folder and its first file
+
+```bash
+mkdir -p src/aadrkit
+```
+
+Create `src/aadrkit/__init__.py` with:
+
+```python
+"""aadrkit: filter and export subsets of the Allen Ancient DNA Resource (AADR)."""
+
+__version__ = "0.1.0"
+```
+
+- **`__init__.py`** is what tells Python "this folder is a package." Anything in it runs when someone writes `import aadrkit`.
+- **The text in triple quotes** is a docstring, the package's built-in description. The documentation rubric looks for these.
+- **`__version__`** gives the package a version number you can check from Python.
+
+### Create `pyproject.toml` in the repo root
+
+```toml
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aadrkit"
+version = "0.1.0"
+description = "Filter and export subsets of the Allen Ancient DNA Resource (AADR)"
+requires-python = ">=3.11"
+dependencies = ["pandas"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+```
+
+- **`[build-system]`** tells pip which tool builds the package. Setuptools is the long-standing standard.
+- **`[project]`** is the package's basic information. `dependencies` lists what it needs to run, so installing `aadrkit` would pull in pandas too.
+- **The pandas dependency is deliberately unpinned here.** `pyproject.toml` describes what the package *needs*; `environment.yml` pins the exact versions *you tested with*. Keeping the two roles separate is standard practice.
+- **`[tool.setuptools.packages.find]`** with `where = ["src"]` tells setuptools to look for packages inside `src/`.
+
+### Install the package in editable mode
+
+From the repo root, with `(aadr-project)` active:
+
+```bash
+pip install -e .
+```
+
+- **`.`** means "the package described in this folder," which setuptools finds through `pyproject.toml`.
+- **`-e`** means **editable**. Instead of copying your code somewhere else, pip links to your `src/aadrkit` folder. When you edit the code, the change takes effect immediately, with no need to reinstall. That's what you want while developing.
+
+Then add this to `environment.yml`, so anyone who builds the environment also gets the package installed:
+
+```yaml
+  - pip
+  - pip:
+      - -e .
+```
+
+These lines go at the end of the `dependencies` list, at the same indentation as the other entries. YAML is strict about indentation, like Python.
+
+### 6e. Check that it imports
+
+```bash
+python -c "import aadrkit; print(aadrkit.__version__, aadrkit.__file__)"
+```
+
+**`python -c`** runs a single line of Python without creating a file. You should see `0.1.0` followed by a path ending in `src/aadrkit/__init__.py`. That path confirms Python is using your editable install.
+
+### 6f. Write and run the first test
+
+Create `tests/test_import.py`:
+
+```python
+import aadrkit
+
+
+def test_package_imports():
+    """The package installs and exposes a version number."""
+    assert aadrkit.__version__ == "0.1.0"
+```
+
+- **pytest finds tests automatically** in files named `test_*.py` and in functions whose names start with `test_`.
+- **`assert`** means "this must be true." If it isn't, the test fails and pytest shows you exactly what didn't match.
+
+Run it from the repo root:
+
+```bash
+pytest
+```
+
+You should see `1 passed`. It's a deliberately trivial test. Its only job is to prove that the installing, importing, and testing pieces all connect, before any real code depends on them.
+
+### 6g. Commit
+
+```bash
+git add pyproject.toml src/aadrkit/__init__.py tests/test_import.py environment.yml
+```
+
+```bash
+git commit -m "Create aadrkit package skeleton with editable install and first test"
+```
+
+Paste the output. Your first real function can be: loading the `.anno` file with all the decisions from your notes built in, tested against your ground-truth individuals. 
+- **Verificaiton:** I created a package for `aadrkit` with its own `src/` folder, `__init__.py`, a `pyproject.toml` in the repo root, installed it with `pip install -e .`, added the "pip, -pip: -e ." dependency to the `environment.yml` file, checked the import of `aadrkit` by running `python -c "import aadrkit; print(aadrkit.__version__, aadrkit.__file__)"`, installed `pytest`, and tested the `aadrkit` package set up by running `test_import.py`. All were successful. (Job of the test is to see if the installing, importing, and testing pieces connect).

@@ -7,3 +7,6 @@ dependencies:
   - python=3.14.6
   - pandas=2.3.3
   - eigensoft=9.0.0
+  - pip
+  - pip:
+    - "-e ."

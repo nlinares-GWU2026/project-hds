@@ -1,0 +1,13 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aadrkit"
+version = "0.1.0"
+description = "Filter and export subsets of the Allen Ancient DNA Resource (AADR)"
+requires-python = ">=3.11"
+dependencies = ["pandas"]
+
+[tool.setuptools.packages.find]
+where = ["src"]

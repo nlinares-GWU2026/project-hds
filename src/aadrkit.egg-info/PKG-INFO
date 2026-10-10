@@ -1,0 +1,6 @@
+Metadata-Version: 2.4
+Name: aadrkit
+Version: 0.1.0
+Summary: Filter and export subsets of the Allen Ancient DNA Resource (AADR)
+Requires-Python: >=3.11
+Requires-Dist: pandas
