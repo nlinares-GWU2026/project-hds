@@ -1167,3 +1167,237 @@ git commit -m "Create aadrkit package skeleton with editable install and first t
 
 Paste the output. Your first real function can be: loading the `.anno` file with all the decisions from your notes built in, tested against your ground-truth individuals. 
 - **Verificaiton:** I created a package for `aadrkit` with its own `src/` folder, `__init__.py`, a `pyproject.toml` in the repo root, installed it with `pip install -e .`, added the "pip, -pip: -e ." dependency to the `environment.yml` file, checked the import of `aadrkit` by running `python -c "import aadrkit; print(aadrkit.__version__, aadrkit.__file__)"`, installed `pytest`, and tested the `aadrkit` package set up by running `test_import.py`. All were successful. (Job of the test is to see if the installing, importing, and testing pieces connect).
+
+## Entry 7: 
+- **Tool:** Claude (Opus 5.5)
+- **What I was doing:** Creating a loader script for the annotation file. 
+- **What I asked (verbatim):** The first step of the `aadrkit` needs to be able to load the `.anno` file correctly. It needs to 1. Treat ".." as missing and only ".." and empty cells. 2. Give important columns short names. 3. Find those columns reliably despite long names. 4. Fail loudly if anything looks wrong rather than quietly loading the wrong column. 
+For it to find each column: use a short pattern matching the start of the name because it is readable, tolerant of small changes, and can be checked for exactly one match. It will be matched against the beginning of the column name. Each patterns must match exactly one column. Error raised if matches one or more than one.
+What to count as missing is ".." and blanks: pandas by default treats a whole list of strings as missing: "NA, N/A, null, None, etc." A real value could happen to be one of those and pandas would erase it silently.
+I also need this implemented into the package to test it. 
+- **Exact output (verbatim):**
+- **7a (now):** write the loader and tests that check its overall structure.
+- **7b (next):** test the loader's values against your hand-verified `ground_truth.tsv`.
+
+### What the loader needs to do
+
+Your notes become its requirements:
+
+1. **Treat `".."` as missing**, and *only* `".."` and empty cells.
+2. **Give the important columns short names**, like `date_bp` instead of a 150-character header.
+3. **Find those columns reliably**, despite long names, a trailing space in one, a duplicate name, and two columns that both start with "ASSESSMENT."
+4. **Fail loudly if anything looks wrong**, rather than quietly loading the wrong column.
+
+### Decision 1: How to find each column
+
+We'll use a **regular expression** for each column, matched against the beginning of the column name. The key safety rule is that **each pattern must match exactly one column**. If it matches none, or more than one, the loader raises an error and tells you which pattern failed. That turns the "silently reads the wrong column" problem into a clear error message.
+
+That rule matters because of what you found. `ASSESSMENT` and `ASSESSMENT WARNINGS` both start with the same word, so the pattern for column 47 is `ASSESSMENT$`. The `$` means "end of name," which excludes the warnings column.
+
+### Decision 2: Only `".."` and blanks count as missing
+
+By default, pandas treats a whole list of strings as missing: `"NA"`, `"N/A"`, `"null"`, `"None"`, and more. In a dataset full of codes and names, a real value could happen to be one of those, and pandas would silently erase it. So the loader switches the defaults off (`keep_default_na=False`) and lists only AADR's own marker and empty cells.
+
+### Write the loader
+
+Create `src/aadrkit/anno.py`:
+
+```python
+"""Load the AADR annotation (.anno) file into a tidy pandas DataFrame.
+
+Column patterns were written for AADR release v66.p1 (1240K panel).
+"""
+import re
+from pathlib import Path
+
+import pandas as pd
+
+# Short name -> regular expression matching the start of the real column name.
+# Each pattern must match exactly one column, or load_anno() raises an error.
+COLUMN_PATTERNS = {
+    "genetic_id": r"Genetic ID",
+    "individual_id": r"Individual ID$",
+    "first_publication": r"First publication",
+    "publication": r"Publication abbreviation$",
+    "doi": r"doi for publication",
+    "date_bp": r"Date mean in BP",
+    "full_date": r"Full Date",
+    "group_id": r"Group ID$",
+    "country": r"Political Entity$",
+    "lat": r"Latitude$",
+    "lon": r"Longitude$",
+    "data_type": r"Data type$",
+    "snps_1240k": r"SNPs hit on autosomal targets .*on 1240k snpset",
+    "y_haplogroup": r"Y haplogroup\s+in ISOGG",
+    "mt_haplogroup": r"mtDNA haplogroup",
+    "assessment": r"ASSESSMENT$",
+}
+
+# AADR writes missing values as ".."; empty cells are also missing.
+MISSING_VALUES = ["..", ""]
+
+
+def find_columns(names):
+    """Map each short name to exactly one real column name.
+
+    Raises ValueError if any pattern matches zero or several columns.
+    """
+    found = {}
+    for short, pattern in COLUMN_PATTERNS.items():
+        matches = [name for name in names if re.match(pattern, name.strip())]
+        if len(matches) != 1:
+            raise ValueError(
+                f"Expected 1 column matching {pattern!r} for '{short}', "
+                f"found {len(matches)}: {matches}"
+            )
+        found[short] = matches[0]
+    return found
+
+
+def load_anno(path):
+    """Read an AADR .anno file and return the key columns under short names.
+
+    AADR's missing-value marker ".." and empty cells become NaN. pandas'
+    other default missing-value strings (such as "NA") are deliberately
+    not applied, so real values are never mistaken for missing ones.
+    """
+    raw = pd.read_csv(
+        Path(path), sep="\t", encoding="utf-8", low_memory=False,
+        keep_default_na=False, na_values=MISSING_VALUES,
+    )
+    columns = find_columns(raw.columns)
+    anno = raw[list(columns.values())].copy()
+    anno.columns = list(columns.keys())
+    return anno
+```
+
+### How it works
+
+**`COLUMN_PATTERNS`** is a dictionary: each short name points to its pattern. Putting the patterns in one place, at the top of the file, means that when a future AADR version renames a column, there's exactly one place to update. The docstring at the top states which version these patterns were written for.
+
+**A few patterns handle specific problems you found:**
+- **`r"..."`** is a "raw string": backslashes are passed to the regular expression untouched instead of being interpreted by Python first. It's the standard way to write regex in Python.
+- **`Individual ID$`**, **`Group ID$`**, and the others ending in `$` must match the whole name.
+- **`Y haplogroup\s+in ISOGG`**: the real column name has *two* spaces between "haplogroup" and "in." `\s+` means "one or more spaces," so the pattern doesn't depend on counting spaces exactly.
+- **`SNPs hit on autosomal targets .*on 1240k snpset`**: `.*` means "any characters," so this reliably picks the 1240k version out of the five similar SNP-count columns.
+- **`name.strip()`** removes the trailing space from column 25's name before matching, so it can't cause problems.
+
+**`find_columns(names)`** checks every pattern against every column name:
+- **`re.match(pattern, ...)`** only matches at the *start* of the name. That's why `Genetic ID` doesn't match column 1, "Persistent Genetic ID."
+- **The list in square brackets** collects every column that matches. This is a list comprehension, a compact way to build a list with a loop.
+- **`if len(matches) != 1: raise ValueError(...)`** is the safety rule. `raise` stops the program with an error, and the message names the pattern and lists what it found, so you know exactly what to fix.
+- **`{pattern!r}`** inside the f-string prints the pattern with its quotes, which makes the error message clearer.
+
+**`load_anno(path)`** is the function users will call:
+- **`pd.read_csv(...)`** has the same settings you used in the scripts, plus `encoding="utf-8"` (for names like `Rodríguez`) and the two missing-value settings above.
+- **`raw[list(columns.values())]`** keeps only the 16 matched columns. `.copy()` makes it an independent table, rather than a view that still points back into `raw`.
+- **`anno.columns = list(columns.keys())`** swaps the long names for the short ones.
+
+### Make `load_anno` available from the package
+
+Update `src/aadrkit/__init__.py`:
+
+```python
+"""aadrkit: filter and export subsets of the Allen Ancient DNA Resource (AADR)."""
+
+from aadrkit.anno import load_anno
+
+__version__ = "0.1.0"
+```
+
+With that import, users can write `aadrkit.load_anno(...)` instead of having to know the function lives in the `anno` module. The module organization becomes an internal detail.
+
+### Write the tests
+
+Create `tests/test_anno.py`:
+
+```python
+from pathlib import Path
+
+import pandas as pd
+import pytest
+
+from aadrkit.anno import COLUMN_PATTERNS, find_columns, load_anno
+
+ROOT = Path(__file__).resolve().parent.parent
+ANNO_PATH = ROOT / "data" / "raw" / "v66.p1_1240K.aadr.PUB.anno"
+
+
+@pytest.fixture(scope="module")
+def anno():
+    """Load the real .anno file once for all tests in this file."""
+    if not ANNO_PATH.exists():
+        pytest.skip("AADR .anno file not found; see README 'Data' section")
+    return load_anno(ANNO_PATH)
+
+
+# --- Tests that need no data ---
+
+def test_find_columns_rejects_two_matches():
+    with pytest.raises(ValueError):
+        find_columns(["Genetic ID (copy 1)", "Genetic ID (copy 2)"])
+
+
+def test_find_columns_rejects_missing_column():
+    with pytest.raises(ValueError):
+        find_columns(["Something unrelated"])
+
+
+# --- Tests on the real file ---
+
+def test_shape(anno):
+    assert anno.shape == (23089, len(COLUMN_PATTERNS))
+
+
+def test_short_column_names(anno):
+    assert list(anno.columns) == list(COLUMN_PATTERNS)
+
+
+def test_genetic_id_is_unique(anno):
+    assert anno["genetic_id"].is_unique
+
+
+def test_missing_marker_becomes_nan(anno):
+    assert pd.api.types.is_float_dtype(anno["lat"])
+    assert anno["lat"].isna().sum() == 784
+```
+
+### How the tests work
+
+**`@pytest.fixture`** marks `anno()` as a **fixture**: shared setup that tests can request. Any test with `anno` as an input automatically receives the loaded table.
+- **`scope="module"`** means the file is loaded once and reused by every test in this file, instead of being reloaded for each test.
+- **`pytest.skip(...)`**: if someone runs the tests without having downloaded the data, these tests are marked "skipped" with a message pointing to the README, instead of failing with a confusing "file not found" error. Your ground truth file is in the repo, but the AADR data isn't, so this keeps the test suite honest about what it can check.
+
+**The first two tests need no data.** They feed `find_columns` made-up column names and check that it refuses them:
+- **`with pytest.raises(ValueError):`** means "the code inside must raise a `ValueError`; if it doesn't, the test fails." Testing that bad input is *rejected* is just as important as testing that good input works. These two tests prove the safety rule actually works.
+
+**The other four test the real file against numbers you measured:**
+- **`test_shape`:** 23,089 rows and 16 columns.
+- **`test_short_column_names`:** the columns come out in the right order with the right names.
+- **`test_genetic_id_is_unique`:** confirms Genetic ID is a unique key, which the whole tool depends on.
+- **`test_missing_marker_becomes_nan`:** latitude is now a real number column, not text, and exactly 784 values are missing. This proves `".."` handling works.
+
+### Run the tests
+
+From the repo root, with `(aadr-project)` active:
+
+```bash
+pytest -v
+```
+
+**`-v`** means "verbose": pytest lists every test by name with PASSED or FAILED, instead of just printing dots. You should see **7 passed**: the import test from Step 6, the two `find_columns` tests, and the four tests on the real file.
+
+If anything fails, paste the full output. pytest's failure messages show exactly what was expected and what it got, and if a column pattern fails, the error message will name the pattern.
+
+### Commit
+
+```bash
+git add src/aadrkit/anno.py src/aadrkit/__init__.py tests/test_anno.py
+```
+
+```bash
+git commit -m "Add load_anno with pattern-based column matching and tests"
+```
+
+Paste the `pytest -v` output. Then in 7b, we'll test the loader's values against your ten hand-verified individuals, plus the "0 BP means present-day" assumption test from your notes.
+- **Verificaiton:**
