@@ -85,33 +85,45 @@ python scripts/profile_anno.py
 ```
 
 ## Repository Layout
+```text
 project-hds/
-├── docs/                                      # Project report, proposal, documentation, notes
-│   ├── Nicole_Linares_Proposal_HDS.pdf        # Individual project proposal
-│   ├── Linares_Dunkel-Bayogha_Proposal_HDS.pdf (REMOVE)
-│   ├── anno_notes.md                          # Dataset and project progress notes
-│   ├── data_checksums.md                      # Verification hashes (MD5/SHA256) to ensure raw data integrity
-│   └── lab1-addendum.md                       # Temporary lab submission addendum TO REMOVE AFTER SEMESTER 
-├── renv/                                      # R environment configuration files managed by the renv package                 
-│   ├── .gitignore                             # Prevents committing local renv library builds and binaries to Git
-│   ├── activate.R                             # R script that automatically initializes the project's renv environment
-│   └── settings.json                          # Configuration settings for renv project behaviors
-├── scripts/                                   # Executable Python scripts for data processing and analysis                  
-│   ├── count_suffixes.py                      # Utility script counting file extensions/suffixes across project files 
-│   ├── explore_anno.py                        # Exploratory script analyzing sample metadata in the annotation file
-│   ├── find_test_indiv.py                     # Script to locate representative test individuals for validation filtering
-│   ├── profile_anno.py                        # Main profiling script inspecting column missingness, data types, and value counts
-│   └── profile_ids.py                         # Script verifying unique individual IDs across AADR metadata files
-├── tests/                                     # Test suites and reference data used to validate code accuracy
-│   └── ground_truth.tsv                       # Reference dataset containing expected results to check filtering logic
-├── .Rprofile                                  # R startup script that auto-loads project settings and activates renv
-├── .gitignore                                 # Specifies intentional untracked files and folders to exclude from Git
-├── AI_USAGE.md                                # Documentation logging AI assistance and usage throughout the project
-├── Dockerfile                                 # Instructions to build a containerized environment reproducing the setup
-├── README.md                                  # Project documentation and setup (this file)
-├── environment.yml                            # Conda environment definition listing Python and system dependencies
-├── project-hds.Rproj                          # RStudio project file for organizing workspace settings
-└── renv.lock                                  Dependency lockfile tracking exact R package versions for reproducibility           
+├── data/                          # NOT tracked by git; created by the download steps (see Data)
+│   ├── raw/                       # AADR v66.p1 files (.anno, .geno, .snp, .ind)
+│   └── test_convertf/             # Temporary outputs from the manual convertf test
+├── docs/                          # Proposal, notes, and checksums
+│   ├── Nicole_Linares_Proposal_HDS.pdf  # Approved project proposal
+│   ├── anno_notes.md              # Findings and design decisions from exploring AADR
+│   ├── data_checksums.txt         # SHA-256 checksums for the downloaded AADR files
+│   └── lab1-addendum.md           # Lab 1 addendum (to remove after the semester)
+├── renv/                          # R environment files managed by renv
+│   ├── .gitignore                 # Keeps renv's local package library out of git
+│   ├── activate.R                 # Activates renv when the project opens
+│   └── settings.json              # renv settings
+├── scripts/                       # Exploration scripts (not part of the package)
+│   ├── convertf_test.par          # Parameter file for the manual convertf test
+│   ├── count_suffixes.py          # Counts suffixes (e.g., -o outliers) in AADR group names
+│   ├── explore_anno.py            # First look at the .anno file: size and column names
+│   ├── find_test_indiv.py         # Finds candidate individuals for edge-case tests
+│   ├── profile_anno.py            # Profiles column types, missing values, and value counts
+│   └── profile_ids.py             # Checks repeated individuals and publication/DOI completeness
+├── src/
+│   ├── aadrkit/                   # The aadrkit Python package
+│   │   └── __init__.py            # Package entry point and version number
+│   ├── placeholder.py             # Lab 1 placeholder (run by the Dockerfile for now)
+│   └── placeholder.R              # Lab 1 placeholder (keeps dplyr recorded for renv)
+├── tests/                         # pytest tests and hand-verified test data
+│   ├── ground_truth.tsv           # Ten AADR individuals verified by hand with grep
+│   └── test_import.py             # Checks that the package installs and imports
+├── .gitignore                     # Files and folders git should not track
+├── .Rprofile                      # Activates renv when R starts in this project
+├── AI_USAGE.md                    # Log of AI assistance and how it was validated
+├── Dockerfile                     # Container build for the environment
+├── README.md                      # This file
+├── environment.yml                # Conda environment: Python, pandas, EIGENSOFT, pytest, aadrkit
+├── project-hds.Rproj              # RStudio project file
+├── pyproject.toml                 # Package metadata pip uses to install aadrkit
+└── renv.lock                      # Exact R package versions        
+```
 
 ## Citation
 
