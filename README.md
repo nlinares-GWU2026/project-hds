@@ -91,7 +91,7 @@ project-hds/
 │   ├── raw/                       # AADR v66.p1 files (.anno, .geno, .snp, .ind)
 │   └── test_convertf/             # Temporary outputs from the manual convertf test
 ├── docs/                          # Proposal, notes, and checksums
-│   ├── Nicole_Linares_Proposal_HDS.pdf  # Approved project proposal
+│   ├── Nicole_Linares_Proposal_aadrkit.pdf  # Approved project proposal
 │   ├── anno_notes.md              # Findings and design decisions from exploring AADR
 │   ├── data_checksums.txt         # SHA-256 checksums for the downloaded AADR files
 │   └── lab1-addendum.md           # Lab 1 addendum (to remove after the semester)
