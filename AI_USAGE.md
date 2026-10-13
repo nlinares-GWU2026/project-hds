@@ -1400,4 +1400,102 @@ git commit -m "Add load_anno with pattern-based column matching and tests"
 ```
 
 Paste the `pytest -v` output. Then in 7b, we'll test the loader's values against your ten hand-verified individuals, plus the "0 BP means present-day" assumption test from your notes.
-- **Verificaiton:**
+- **Verificaiton:** I typed up the script and ran `pytest -v` but ran into an error (pasted below). I attempted to inspect the error myself but I did not understand what went wrong. I suspected it was something in the `anno.py` file but was not sure. 
+- **What I asked next (verbatim):** "What does this error mean? Is it in the `anno.py file`?"
+- **Exact output (verbatim):**
+
+
+### How to read the failure
+
+Look at what pytest printed for `anno` in each failed test:
+
+```
+[23089 rows x 1 columns]
+```
+
+The loader returned all 23,089 rows but only **one** column, `genetic_id`. All three failures follow from that:
+
+- **`test_shape`** expected 16 columns and got 1.
+- **`test_short_column_names`** found `genetic_id` and then nothing else.
+- **`test_missing_marker_becomes_nan`** crashed because there's no `lat` column.
+
+When several tests fail at once, look for the **one** thing they all have in common. Here, the problem isn't in the tests; it's in what `load_anno` gave them.
+
+### The likely cause: `return found` is indented too far
+
+`genetic_id` is the **first** entry in `COLUMN_PATTERNS`. Getting only the first one means the loop in `find_columns` stopped after its first pass. The usual reason is that `return found` ended up *inside* the loop:
+
+```python
+    for short, pattern in COLUMN_PATTERNS.items():
+        matches = [...]
+        if len(matches) != 1:
+            raise ValueError(...)
+        found[short] = matches[0]
+        return found          # ← inside the loop: returns after the first column
+```
+
+`return` ends the function immediately. Inside the loop, it runs at the end of the very first pass, with just one column found. It's the same kind of silent bug as the indentation issue in `profile_anno.py`: perfectly valid Python, wrong behavior.
+
+**The fix:** move `return found` four spaces left, so it lines up with `for` and runs only once the loop has finished:
+
+```python
+    for short, pattern in COLUMN_PATTERNS.items():
+        matches = [name for name in names if re.match(pattern, name.strip())]
+        if len(matches) != 1:
+            raise ValueError(
+                f"Expected 1 column matching {pattern!r} for '{short}', "
+                f"found {len(matches)}: {matches}"
+            )
+        found[short] = matches[0]
+    return found
+```
+
+If your `return found` is already at that level, paste your `find_columns` function and we'll find what else is cutting the loop short.
+
+### Why the other tests passed anyway
+
+Notice that `test_find_columns_rejects_two_matches` and `test_find_columns_rejects_missing_column` **passed** despite the bug. Both feed in fake names that fail on the *first* pattern, so the error is raised before the loop ever gets to the early `return`. They tested the safety rule correctly, but they never tested that the function keeps going through all 16 patterns.
+
+That's a gap worth closing with a test that needs no data, so it would catch this even on a computer without AADR downloaded. Add this to `tests/test_anno.py`, under the other two "no data" tests:
+
+```python
+def test_find_columns_finds_every_pattern():
+    """Every pattern is matched, not just the first one."""
+    names = [
+        "Genetic ID (suffixes...)", "Individual ID", "First publication: ...",
+        "Publication abbreviation", "doi for publication ...", "Date mean in BP ...",
+        "Full Date ...", "Group ID", "Political Entity", "Latitude", "Longitude",
+        "Data type",
+        "SNPs hit on autosomal targets (Computed using easystats on 1240k snpset)",
+        "Y haplogroup  in ISOGG notation ...", "mtDNA haplogroup ...", "ASSESSMENT",
+    ]
+    assert len(find_columns(names)) == len(COLUMN_PATTERNS)
+```
+
+- **The `names` list** is a set of made-up column names, each shaped like the real one, including the double space in the Y haplogroup name.
+- **The `assert`** checks that `find_columns` returns one entry for every pattern.
+
+**Test it on purpose:** run `pytest -v` *before* fixing the indentation. This new test should fail too. Then fix the indentation and run it again. Seeing a test fail on the bug and pass on the fix is how you know the test actually checks what you think it does. A test that has never failed might not be testing anything.
+
+### After the fix
+
+```bash
+pytest -v
+```
+
+You should now see **8 passed**: the 7 from before plus the new one.
+
+The run took about 18 seconds, almost all of it loading the 13 MB file across `/mnt/c`. Because the fixture uses `scope="module"`, that load happens once, not once per test.
+
+Then commit:
+
+```bash
+git add src/aadrkit/anno.py tests/test_anno.py
+```
+
+```bash
+git commit -m "Fix early return in find_columns; test that every pattern is matched"
+```
+
+Paste the new `pytest -v` summary, and then we'll do comparing the loader against your ground-truth individuals.
+- **Verification:** As Claude suggested, there was indeed that exact return indentation error in my `anno.py`. First I added that block that checks that every pattern is matched rather than just the first one and tested it - the test failed again. Then I fixed the indentation in the `anno.py` file and ran the test again - it failed. So I inspected it myself and found that there was a typo inside of my `COLUMN_PATTERNS`. `"publication": r"Publication abbreviations$"` was supposed to be `"publication": r"Publication abbreviation$"` - there was an additional "s" at the end of abbreviation that created an ERROR message. After I fixed this, the test ran and passed successfully. 

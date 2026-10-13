@@ -12,7 +12,7 @@ COLUMN_PATTERNS = {
     "genetic_id": r"Genetic ID", # raw string passed to Regex untouched instead of being interpreted first, ignore escape seqs & backslashes
     "individual_id": r"Individual ID$", # "$" matches end of string
     "first_publication": r"First publication",
-    "publication": r"Publication abbreviations$",
+    "publication": r"Publication abbreviation$",
     "doi": r"doi for publication",
     "date_bp": r"Date mean in BP",
     "full_date": r"Full Date",
@@ -33,19 +33,22 @@ MISSING_VALUES = ["..", ""]
 
 def find_columns(names):
     """Map each short name to exactly one real column name.
-    Raises ValueError if any pattern matches zero or several columns."""
+    Raises ValueError if any pattern matches zero or several columns.
+    Checks every pattern against every column name."""
 
     found = {} # empty dict to store the final mapped pairs 
     for short, pattern in COLUMN_PATTERNS.items(): #
         matches = [name for name in names if re.match(pattern, name.strip())] # Searches through all candidate header strings in names,
-        # removes any leading or trailing whitespace before matching, checks if regex pattern matches the stripped column name starting from beginning of string, then collects name from names that matches into list of matches
+        # removes any leading or trailing whitespace before matching, checks if regex pattern matches the stripped column name starting 
+        # from beginning of string, then collects name from names that matches into list of matches
+        # List in square brackets collects every column that matches
         if len(matches) != 1:
             raise ValueError(
                 f"Expected 1 column matching {pattern!r} for '{short}', "
                 f"found {len(matches)}: {matches}"
             )
         found[short] = matches[0]
-        return found
+    return found
 
 def load_anno(path):
     """Read an AADR .anno file and return the key columns under short names. 
@@ -59,9 +62,8 @@ def load_anno(path):
     )
     columns = find_columns(raw.columns) # Calls the find_columns helper function passing list of full column headers from the raw file
     # Returns dict where keys are short aliases and values are the actual header names found in file
-    anno = raw[list(columns.values())].copy()
-    anno.columns = list(columns.keys())
+    anno = raw[list(columns.values())].copy() # Keeps only 16 matched columns , making it an independent table 
+    anno.columns = list(columns.keys()) # Swaps the long names for short ones
     return anno
-    # Filters raw to extract only the target columns and creates independent copy of that df subset
-    # Renames subsetted columns from their original long names to clean short aliases
+
     
