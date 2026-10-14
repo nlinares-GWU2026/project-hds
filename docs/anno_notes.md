@@ -111,3 +111,20 @@ We don't know whether the `.anno` lists individuals in the same order as the `.i
 - Part B: Test the loader's values against hand verified `ground_truth.tsv`. Even though part A checked the structure (right number of columns, the right names, latitude as numbers), could still read the *wrong column*. 10 ground truth individuals that test each loader decision: 1) Picks the 1240k SNP column out of 5 similar ones (every row's `snps_1240k`, 2) ".." becomes missing (`lat` for I8508, Khwit, and Chimp; `doi` for VK202, VK201, and Chimp), 3) Negative dates kept as-is (Khwit (−4)), 4) Sepcial characters survive (gun005’s publication, `Rodríguez-Varela...`), 5) Outlier suffix kept in the group name (VK201, `Scotland_Viking-o`), 6) Approximate present-day coordinates (NA20813 (40.00001)). Also add data assumption that ** 0 BP means "present" and exactly 4 are reference genomes.
     - Because `.anno` fixture lives inside of `test_anno.py`, the new tests will go in a second file that also needs it. So create: `conftest.py` in the `tests/` folder. Any fixture defined there is automaticaly available to every test file with no import needed. 
     - The ground truth comparison closes the gap. My ten individuals' values came from `grep` reading the raw file, completely independent of the loader. If the loader returns exactly those values, it's reading the right columns, handling missing values correctly, and keeping special characters intact.
+    - `test_data_assumptions.py` does not test if the code works correctly. It checks that *the data still behaves the way my design assumes: 1) The present-day filter will rely on "O BP means present-day" and 2) The default exclusion of reference genomes will rely on ending in `.REF`. If a newer AADR release for example where the unknown dates are also stored as 0, the code would run without errors and give wrong answers. The tests turn the hidden risk into a visible failure.
+**SUMMARY OF 11 TESTS THAT WERE SUCCESSFUL** 
+1. `test_package_imports` - checks the package installs and imports, and reports version 0.10
+(No data needed, Column-matching safety rules)
+2. `test_find_columns_rejects_two_matches` - checks if a pattern matches 2 columns, the loader stops with an error instead of guessing.
+3. `test_find_columns_rejects_misisng_column` - checks if a pattern matches no column, the loader stops eith an error.
+4. `test_find_columns_finds_every_pattern` - checks if all 16 patterns get matched, not just the first.
+(Real data, Loader structure)
+5. `test_shape` - checks the loaded table has 23,089 rows and 16 columns.
+6. `test_short_column_names` - checks if the columns have the right short names in the right order.
+7. `test_genetic_id_is_unique` - checks if every Genetic ID appears once, so it can be safely be used as the key for matching rows.
+8. `test_midding_marker_becomes_nan` - checks if ".." is turned into a real missing value. Latitude loads as numbers with exactly 784 missing. 
+(Real data, Loader correctness)
+9. `test_matches_hand_verified_individuals` - checks for my 10 hand-picked individuals. Every value the loader returns matches what I verified with `grep`. This is the *only* test that proves the loader reads the *right* columns, not just the *number* of columns.
+(Real data, Data assumptions)
+10. `test_zero_bp_means_present_day` - checks all 3,970 individuals dated 0 BP are labeled as "present", so the BP can safely mean present day.
+11. `test_reference_genomes` - checksi that exactly 4 rows (Ancestor, Chimp, Gorilla, human ref) are reference genomes, not people. 

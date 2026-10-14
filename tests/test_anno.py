@@ -3,13 +3,6 @@ import pytest
 from aadrkit.anno import COLUMN_PATTERNS, find_columns, load_anno
 # Imports custom helper constants and functions (COLUMN_PATTERNS, find_columns, and load_anno from aadrkit.anno)
 
-##### Tests that need  data #####
-def anno():
-    """Load the real .anno file once for all tests in this file"""
-    if not ANNO_PATH.exists():
-        pytest.skip("AADR .anno file not found. See README 'Data' section") # If someone runs test without having downloaded data, tests are marked as "skipped" instead of just failing
-    return load_anno(ANNO_PATH)
-
 ##### Tests that need NO data #####
 def test_find_columns_rejects_two_matches():
     with pytest.raises(ValueError):

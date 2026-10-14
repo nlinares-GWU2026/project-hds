@@ -1176,8 +1176,8 @@ For it to find each column: use a short pattern matching the start of the name b
 What to count as missing is ".." and blanks: pandas by default treats a whole list of strings as missing: "NA, N/A, null, None, etc." A real value could happen to be one of those and pandas would erase it silently.
 I also need this implemented into the package to test it. 
 - **Exact output (verbatim):**
-- **7a (now):** write the loader and tests that check its overall structure.
-- **7b (next):** test the loader's values against your hand-verified `ground_truth.tsv`.
+- **A (now):** write the loader and tests that check its overall structure.
+- **B (next):** test the loader's values against your hand-verified `ground_truth.tsv`.
 
 ### What the loader needs to do
 
@@ -1501,6 +1501,191 @@ Paste the new `pytest -v` summary, and then we'll do comparing the loader agains
 ## Entry 8:
 - **Tool:** Claude (Opus 5.5)
 - **What I was doing:** Testing the loader against the ground individuals. 
-- **What I asked (verbatim):** Can you create 
+- **What I asked (verbatim):** Can you create a script that tests the ground truth individuals? Do I need a second script? Or would I be able to move the `anno` fixture so it works in a seperate test? I would also like to test a failure case. 
 - **Exact output (verbatim):**
-- **Verificaiton:**
+### What this step proves
+
+In the first part, the tests checked the loader's **structure**: the right number of columns, the right names, latitude as numbers. But a loader could pass all of those and still read the **wrong** column. For example, the SNP-count pattern could accidentally match the Human Origins SNP column instead of the 1240k one. The shape would be perfect and every value would be wrong.
+
+The ground truth comparison closes that gap. Your ten individuals' values came from `grep` reading the raw file, completely independent of the loader. If the loader returns exactly those values, it's reading the right columns, handling missing values correctly, and keeping special characters intact.
+
+Your ten individuals were chosen so that each loader decision gets checked at least once:
+
+| Loader decision | Checked by |
+|---|---|
+| Picks the 1240k SNP column out of five similar ones | Every row's `snps_1240k` |
+| `".."` becomes missing | `lat` for I8508, Khwit, and Chimp; `doi` for VK202, VK201, and Chimp |
+| Negative dates kept as-is | Khwit (−4) |
+| Special characters survive (UTF-8) | gun005's publication, `Rodríguez-Varela...` |
+| Outlier suffix kept in the group name | VK201, `Scotland_Viking-o` |
+| Approximate present-day coordinates | NA20813 (40.00001) |
+
+We'll also add the **data assumption tests** from your notes: 0 BP means "present," and exactly four rows are reference genomes. Those test the *data*, not the code, and I'll explain the difference below.
+
+### Share fixtures with `conftest.py`
+
+Right now, the `anno` fixture lives inside `test_anno.py`. Your new tests will go in a second file that also needs it, and the filter tests later will too. Copying the fixture into every file would mean several copies to keep in sync.
+
+pytest has a built-in answer: a file named **`conftest.py`** in the `tests/` folder. Any fixture defined there is automatically available to every test file, with no import needed.
+
+Create `tests/conftest.py`:
+
+```python
+"""Shared pytest fixtures for the aadrkit test suite."""
+from pathlib import Path
+
+import pandas as pd
+import pytest
+
+from aadrkit.anno import load_anno
+
+ROOT = Path(__file__).resolve().parent.parent
+ANNO_PATH = ROOT / "data" / "raw" / "v66.p1_1240K.aadr.PUB.anno"
+GROUND_TRUTH_PATH = ROOT / "tests" / "ground_truth.tsv"
+
+
+@pytest.fixture(scope="session")
+def anno():
+    """The real AADR v66.p1 .anno file, loaded once for the whole test run."""
+    if not ANNO_PATH.exists():
+        pytest.skip("AADR .anno file not found; see README 'Data' section")
+    return load_anno(ANNO_PATH)
+
+
+@pytest.fixture(scope="session")
+def ground_truth():
+    """Ten individuals whose values were verified by hand with grep."""
+    return pd.read_csv(
+        GROUND_TRUTH_PATH, sep="\t", encoding="utf-8",
+        keep_default_na=False, na_values=[".."],
+    )
+```
+
+- **`scope="session"`** instead of `"module"`: the file is now loaded **once for the entire test run**, shared across all test files. With the 18-second load you saw, that keeps the test run from getting slower as you add files.
+- **The `ground_truth` fixture reads your file with the same missing-value rules as the loader** (only `".."` counts as missing). That's deliberate: the comparison should test whether the loader reads the right *values*, not whether two different missing-value settings happen to agree.
+- **The ground truth fixture has no skip.** `ground_truth.tsv` is committed to the repo, so it's always present.
+
+### Update `test_anno.py`
+
+Since the fixture now lives in `conftest.py`, remove these from the top of `test_anno.py`:
+
+- the `from pathlib import Path` line
+- the `ROOT = ...` and `ANNO_PATH = ...` lines
+- the whole `@pytest.fixture` block and its `anno()` function
+
+Keep `import pandas as pd`, `import pytest`, and the `from aadrkit.anno import ...` line. Every test using `anno` will still work, because pytest finds the fixture in `conftest.py` automatically.
+
+Then add this test at the bottom:
+
+```python
+def test_matches_hand_verified_individuals(anno, ground_truth):
+    """Loader values match the ten individuals verified by hand with grep."""
+    ids = ground_truth["genetic_id"].tolist()
+    columns = [c for c in ground_truth.columns if c != "genetic_id"]
+    actual = anno.set_index("genetic_id").loc[ids, columns].reset_index()
+    pd.testing.assert_frame_equal(actual, ground_truth, check_dtype=False)
+```
+
+### How the comparison works
+
+- **The test asks for both fixtures** by listing them as inputs: `(anno, ground_truth)`.
+- **`ids`** is the list of your ten Genetic IDs, in the order they appear in `ground_truth.tsv`.
+- **`columns`** is every ground-truth column except `genetic_id`: individual ID, publication, DOI, date, group, country, latitude, and SNPs. The list comprehension simply skips `genetic_id`.
+- **Building `actual`**, in three steps:
+  1. `set_index("genetic_id")` makes Genetic ID the row label, so you can look up rows by ID instead of by position. This is "always match by ID, never by row order" in action.
+  2. `.loc[ids, columns]` picks out exactly your ten individuals, in your file's order, and exactly the columns being compared.
+  3. `.reset_index()` turns `genetic_id` back into an ordinary first column, so `actual` has the same shape as `ground_truth`.
+- **`pd.testing.assert_frame_equal(actual, ground_truth, ...)`** is pandas' built-in tool for comparing two tables. If anything differs, it says exactly which column and row, and shows both values. Two details:
+  - **It treats missing values as equal to each other.** A plain `==` comparison wouldn't, as you saw with the publication columns in `profile_ids.py`.
+  - **`check_dtype=False`** ignores differences in *storage* type (for example, a number stored as a whole number in one table and a decimal in the other), while still requiring the actual values to match.
+
+### Test the data assumptions
+
+Create `tests/test_data_assumptions.py`:
+
+```python
+"""Facts about AADR v66.p1 that aadrkit's design relies on.
+
+These test the data, not the code. If they fail after switching to a
+different AADR release, revisit the design decisions in docs/anno_notes.md.
+"""
+
+
+def test_zero_bp_means_present_day(anno):
+    """Every individual dated 0 BP is labeled 'present'."""
+    at_zero = anno[anno["date_bp"] == 0]
+    assert len(at_zero) == 3970
+    assert (at_zero["full_date"] == "present").all()
+
+
+def test_reference_genomes(anno):
+    """Exactly four rows are reference genomes, not individuals."""
+    refs = anno[anno["genetic_id"].str.endswith(".REF")]
+    assert sorted(refs["genetic_id"]) == [
+        "Ancestor.REF", "Chimp.REF", "Gorilla.REF", "Href.REF",
+    ]
+    assert (refs["data_type"] == "Reference Genome").all()
+```
+
+### Why these are different from the other tests
+
+Your other tests check that **your code** works correctly. These check that **the data** still behaves the way your design assumes:
+
+- The present-day filter will rely on "0 BP means present-day."
+- The default exclusion of reference genomes will rely on them ending in `.REF`.
+
+If someone later points `aadrkit` at a newer AADR release where, say, unknown dates are also stored as 0, the code would run without errors and quietly give wrong answers. These tests turn that hidden risk into a visible failure, and the docstring at the top of the file tells whoever sees it what to do next.
+
+Two pandas pieces are new:
+
+- **`.all()`** is true only if every value in the column is true. So `(at_zero["full_date"] == "present").all()` means "every 0 BP row says present." The parentheses matter: the comparison runs first, then `.all()` checks the results.
+- **`.str.endswith(".REF")`** checks the end of each ID. The dot is just a dot here, because `endswith` matches text literally rather than using regular expressions.
+
+### Run the tests
+
+```bash
+pytest -v
+```
+
+You should see **11 passed**: the 8 from before, the ground truth test, and the two data-assumption tests. The tests now come from three files, and the `.anno` file is still loaded only once.
+
+### Prove the ground truth test can fail
+
+Same idea as with the indentation bug: a test that has never failed might not be testing anything. Break the loader on purpose, in exactly the way this test exists to catch.
+
+**1.** In `src/aadrkit/anno.py`, change the SNP pattern to pick the wrong column, the Human Origins count instead of 1240k:
+
+```python
+    "snps_1240k": r"SNPs hit on autosomal targets .*on HO snpset",
+```
+
+**2.** Run only the ground truth test. `-k` selects tests whose names contain the given text:
+
+```bash
+pytest -v -k hand_verified
+```
+
+It should **fail**, and `assert_frame_equal` should report that the `snps_1240k` column differs, showing your verified values next to the wrong ones. Notice that `test_shape` would still pass with this bug, since the column count hasn't changed. That's exactly the gap this test fills.
+
+**3.** Change the pattern back to `on 1240k snpset`. Then confirm the file is back to exactly what you committed:
+
+```bash
+git diff src/aadrkit/anno.py
+```
+
+**No output means no changes**, so the pattern is restored exactly. Then run the full suite again and confirm 11 passed.
+
+Intentionally breaking code to check that tests catch it is a small version of a technique called **mutation testing**. Describing it in your report's oversight section shows the tests were themselves tested.
+
+## 7b.6: Commit
+
+```bash
+git add tests/conftest.py tests/test_anno.py tests/test_data_assumptions.py
+```
+
+```bash
+git commit -m "Test loader against hand-verified individuals and data assumptions"
+```
+
+Paste the `pytest -v` output from step 4 and the failure message from step 5. After that, Step 8 is the first filter functions: date range and present-day exclusion.
+- **Verificaiton:** I ran the `pytest -v` and all 11 tests passed. I also edited the `anno.py` script to pick the wrong column by changing the SNP pattern. I then ran only the ground truth test against that and it failed successfully with an assertion failure and it reported that the `snp_1240k` column differed. The `test_shape` also passed because the column count did not change. 

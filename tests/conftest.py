@@ -13,7 +13,7 @@ def anno():
     """The real AADR v66.p1 .anno file, loaded once for the whole test run."""
     if not ANNO_PATH.exists():
         pytest.skip("AADR .anno file not found; see README 'Data' section")
-    return load_anno
+    return load_anno(ANNO_PATH)
 
 @pytest.fixture(scope="session")
 def ground_truth():
