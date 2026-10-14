@@ -1,16 +1,9 @@
-from pathlib import Path
 import pandas as pd
 import pytest
 from aadrkit.anno import COLUMN_PATTERNS, find_columns, load_anno
 # Imports custom helper constants and functions (COLUMN_PATTERNS, find_columns, and load_anno from aadrkit.anno)
 
-ROOT = Path(__file__).resolve().parent.parent
-ANNO_PATH = ROOT / "data" / "raw" / "v66.p1_1240K.aadr.PUB.anno"
-
 ##### Tests that need  data #####
-@pytest.fixture(scope="module") # Marks anno() as a reusable setup function that provides data or objects to test functions
-# Any test with `anno` as an input automatically receives the loaded table
-# `scope="module"` allows file to be reusable by every test in this file instead of being reloaded per test 
 def anno():
     """Load the real .anno file once for all tests in this file"""
     if not ANNO_PATH.exists():
@@ -56,3 +49,15 @@ def test_missing_marker_becomes_nan(anno):
     assert anno["lat"].isna().sum() == 784
 # Checks that the lat column was converted to floating-point num data type 
 # Asserts that AADR's placeholder missing markers were correctly replaced with NaN, yielding 784 missing latitude entries
+
+##### Ground Truth Individuals #####
+def test_matches_hand_verified_individuals(anno, ground_truth): # Test asks for both fixtures
+    """Loader values match the ten individuals verified by hand with grep."""
+    ids = ground_truth["genetic_id"].tolist() # List of 10 Genetic IDs in order they appear in ground_truth.tsv
+    columns = [c for c in ground_truth.columns if c != "genetic_id"] # Every ground truth column except genetic_id: individual ID, publication,
+    # DOI, group, date, country, lat, and SNPs
+    actual = anno.set_index("genetic_id").loc[ids, columns].reset_index() # Makes Genetic ID the row label to look up rows by ID instead of position
+    # Picks out exactly the 10 test individuals in the file's order and exactly the columns being compared.
+    # Turns genetic_id back into an ordinary first column so `actual` has the same shape as `ground_truth`
+    pd.testing.assert_frame_equal(actual, ground_truth, check_dtype=False)
+    # pandas tool for comparing two tables, ignores the differences in storage type while still requiring actual values to match
