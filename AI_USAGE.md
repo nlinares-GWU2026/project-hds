@@ -1677,7 +1677,7 @@ git diff src/aadrkit/anno.py
 
 Intentionally breaking code to check that tests catch it is a small version of a technique called **mutation testing**. Describing it in your report's oversight section shows the tests were themselves tested.
 
-## 7b.6: Commit
+### Commit
 
 ```bash
 git add tests/conftest.py tests/test_anno.py tests/test_data_assumptions.py
@@ -1689,3 +1689,238 @@ git commit -m "Test loader against hand-verified individuals and data assumption
 
 Paste the `pytest -v` output from step 4 and the failure message from step 5. After that, Step 8 is the first filter functions: date range and present-day exclusion.
 - **Verificaiton:** I ran the `pytest -v` and all 11 tests passed. I also edited the `anno.py` script to pick the wrong column by changing the SNP pattern. I then ran only the ground truth test against that and it failed successfully with an assertion failure and it reported that the `snp_1240k` column differed. The `test_shape` also passed because the column count did not change. 
+
+## Entry 9:
+- **Tool:** Cladue (Opus 5.5)
+- **What I was doing:** Creating the first filter functions.
+- **What I asked (verbatim):** "I need you to help me write a script that takes the table from `load_anno` and returns a new table containing only the rows that pass. Each filter will be a small function. Let's start with three filters: 1) a filter for date range that keeps individuals dated between two values, 2) a filter that excludes present day individuals, and 3) a filter that removes reference genomes. Important to note as a decision is that present day means exactly `date_bp == 0` so someone like Khwit is kept. 
+- **Exact output (verbatim):**
+Excellent. You've now seen the ground truth test fail on a real bug and pass on the fix, so you know it actually guards the loader.
+
+### The first filter functions
+
+### How the filters will be designed
+
+This design has three advantages:
+
+- **They combine freely.** A full query becomes a chain: filter by date, then remove present-day individuals, then filter by country. Each step's output feeds the next.
+- **Each is easy to test on its own.** One function, one job, a few clear tests.
+- **They don't change the original table.** Each filter returns a new one, so you can't accidentally lose data partway through a chain.
+
+Decisions like "exclude reference genomes by default" and printed messages like "784 individuals excluded" will live one level up, in a single top-level function we'll build after the individual filters work. Keeping the filters simple now makes that easier later.
+
+This step builds three filters:
+
+1. **`filter_date_range`**: keep individuals dated between two values.
+2. **`exclude_present_day`**: remove present-day individuals.
+3. **`exclude_reference_genomes`**: remove the four `.REF` rows.
+
+### One design decision: what counts as "present-day"?
+
+Present-day means exactly `date_bp == 0`, so Khwit is **kept**. Khwit has a real historical date, sampled from a 20th-century burial, and AADR itself distinguishes it ("1954 CE") from "present." A user who wants only older individuals can combine this with a date range, such as `min_bp=100`. The docstring will state this explicitly, and Khwit becomes the test for it.
+
+If you'd rather treat everything at or below 0 BP as present-day, that's a reasonable choice too. Just change `!= 0` to `> 0` in the code below and flip the Khwit test. Whatever you choose, the documentation and tests should say so.
+
+### Write the filters
+
+Create `src/aadrkit/filters.py`:
+
+```python
+"""Filter functions for AADR annotation tables returned by load_anno().
+
+Each function takes a DataFrame and returns a new, filtered DataFrame,
+so filters can be combined in any order.
+"""
+import pandas as pd
+
+
+def filter_date_range(anno, min_bp=None, max_bp=None):
+    """Keep individuals whose mean date (years BP) is within [min_bp, max_bp].
+
+    BP means "before present", where present = 1950 CE, so larger numbers
+    are older. Both bounds are inclusive, and either can be None for no
+    limit. Individuals with a missing date are excluded whenever a bound
+    is given.
+    """
+    if min_bp is not None and max_bp is not None and min_bp > max_bp:
+        raise ValueError(f"min_bp ({min_bp}) is greater than max_bp ({max_bp})")
+    keep = pd.Series(True, index=anno.index)
+    if min_bp is not None:
+        keep &= anno["date_bp"] >= min_bp
+    if max_bp is not None:
+        keep &= anno["date_bp"] <= max_bp
+    return anno[keep]
+
+
+def exclude_present_day(anno):
+    """Remove present-day individuals (date_bp == 0, labeled "present" in AADR).
+
+    Individuals dated after 1950 CE (negative BP, such as 1954 CE) are kept,
+    because they have a real historical date rather than "present".
+    """
+    return anno[anno["date_bp"] != 0]
+
+
+def exclude_reference_genomes(anno):
+    """Remove reference genomes (Genetic IDs ending in ".REF"), which are not individuals."""
+    return anno[~anno["genetic_id"].str.endswith(".REF")]
+```
+
+### How each filter works
+
+**`filter_date_range`**
+
+- **`min_bp=None, max_bp=None`** are **default values**. If a caller leaves one out, it's `None`, meaning "no limit on that side." So `filter_date_range(anno, min_bp=5000)` means "5,000 years or older," with no upper limit.
+- **Why name them `min_bp` and `max_bp`?** Because BP counts backward, "start" and "end" would be confusing: is the start the older date or the younger one? `min_bp=3000, max_bp=5000` reads unambiguously as "between 3,000 and 5,000 years before present."
+- **The `raise ValueError`** catches a reversed range like `min_bp=5000, max_bp=3000`. Without it, the filter would quietly return zero rows, and the user might think there simply aren't any individuals in that range. An error message makes the mistake obvious.
+- **`keep = pd.Series(True, index=anno.index)`** starts with a column of `True`, one per row, meaning "keep everything so far." `index=anno.index` lines its rows up exactly with `anno`'s rows.
+- **`keep &= ...`** is short for `keep = keep & ...`. It narrows the selection: a row stays `True` only if it was already `True` **and** passes the new condition. Each bound that's given narrows it further.
+- **Missing dates:** comparing a missing value with anything gives `False`, so rows with no date are dropped whenever a bound is set. The docstring says so. v66.p1 happens to have no missing dates, but the function shouldn't depend on that.
+- **`>=` and `<=`** make both bounds **inclusive**: VK202, dated exactly 1000 BP, is kept by `min_bp=1000`.
+
+**`exclude_present_day`**
+
+- **`anno["date_bp"] != 0`** keeps every row whose date isn't exactly 0. Khwit's −4 passes.
+- **A missing date is also kept,** because "unknown" isn't the same as "present." It doesn't happen in v66.p1, but now the behavior is defined.
+
+**`exclude_reference_genomes`**
+
+- **`~`** means NOT, as before. So this keeps rows whose ID does **not** end in `.REF`.
+- The references are also dated 0 BP, so `exclude_present_day` happens to remove them too. They're still separate functions, because a researcher might want present-day individuals **without** the chimpanzee and gorilla references.
+
+## 8.2: Write the tests
+
+Create `tests/test_filters.py`. This file uses **two kinds of tests**, and that's worth understanding:
+
+- **Toy-table tests** use a tiny table you build in code, where every edge case is deliberately included and you can see the right answer at a glance. They run instantly and need no AADR data.
+- **Real-data tests** check the same filters on the real file, using your hand-verified individuals.
+
+```python
+import pandas as pd
+import pytest
+
+from aadrkit.filters import (
+    exclude_present_day,
+    exclude_reference_genomes,
+    filter_date_range,
+)
+
+
+@pytest.fixture
+def toy():
+    """A tiny hand-made table covering the edge cases."""
+    return pd.DataFrame({
+        "genetic_id": ["A", "B", "C", "D", "E", "Ref.REF"],
+        "date_bp": [0, -4, 1000, 1500, float("nan"), 0],
+    })
+
+
+# --- Toy-table tests ---
+
+def test_date_range_bounds_are_inclusive(toy):
+    result = filter_date_range(toy, min_bp=1000, max_bp=1500)
+    assert list(result["genetic_id"]) == ["C", "D"]
+
+
+def test_date_range_one_sided(toy):
+    assert list(filter_date_range(toy, min_bp=1000)["genetic_id"]) == ["C", "D"]
+    assert list(filter_date_range(toy, max_bp=0)["genetic_id"]) == ["A", "B", "Ref.REF"]
+
+
+def test_date_range_without_bounds_keeps_everything(toy):
+    assert len(filter_date_range(toy)) == len(toy)
+
+
+def test_date_range_rejects_reversed_bounds(toy):
+    with pytest.raises(ValueError):
+        filter_date_range(toy, min_bp=5000, max_bp=3000)
+
+
+def test_exclude_present_day_keeps_post_1950_and_missing(toy):
+    assert list(exclude_present_day(toy)["genetic_id"]) == ["B", "C", "D", "E"]
+
+
+def test_exclude_reference_genomes(toy):
+    assert list(exclude_reference_genomes(toy)["genetic_id"]) == ["A", "B", "C", "D", "E"]
+
+
+# --- Real-data tests, using hand-verified individuals ---
+
+def test_date_range_on_real_data(anno):
+    ids = set(filter_date_range(anno, min_bp=1000, max_bp=1500)["genetic_id"])
+    assert {"VK202.AG", "VK201.AG", "YCH017.AG"} <= ids            # 1000, 1460, 1075 BP
+    assert not {"gun005.SG", "I8508.AG", "NA20813.DG"} & ids        # 992, 6356, 0 BP
+
+
+def test_exclude_present_day_on_real_data(anno):
+    result = exclude_present_day(anno)
+    ids = set(result["genetic_id"])
+    assert len(result) == 23089 - 3970
+    assert "Khwit.SG" in ids                                         # -4 BP (1954 CE) is kept
+    assert not {"NA20813.DG", "JHF05.AG", "Chimp.REF"} & ids
+```
+
+### How the tests work
+
+**The `toy` fixture** builds a six-row table where each row is an edge case:
+
+| Row | `date_bp` | Why it's there |
+|---|---|---|
+| A | 0 | Present-day |
+| B | −4 | Post-1950, like Khwit |
+| C | 1000 | Sits exactly on a boundary |
+| D | 1500 | Sits exactly on the other boundary |
+| E | missing | Missing date |
+| Ref.REF | 0 | Reference genome |
+
+This fixture has no `scope`, so it's rebuilt fresh for every test. Building a six-row table takes no time, and a fresh copy means no test can affect another.
+
+**What each toy test checks:**
+- **Inclusive bounds:** C (1000) and D (1500) sit exactly on the edges and must both be kept.
+- **One-sided ranges:** with only `max_bp=0`, the result is A, B, and Ref.REF. B (−4) is included because −4 is below 0. E is excluded because its date is missing.
+- **No bounds:** nothing is removed, not even E.
+- **Reversed bounds:** must raise an error rather than quietly return nothing.
+- **Present-day:** B (post-1950) and E (missing date) are kept; A and Ref.REF (both 0) are removed.
+- **Reference genomes:** only Ref.REF is removed.
+
+**The real-data tests use Python set operations**, which keep membership checks short and readable:
+- **`set(...)`** turns the list of IDs into a set, which is good for "is this in there?" questions.
+- **`{...} <= ids`** means "every ID on the left is in `ids`," a subset check. VK202 (exactly 1000), VK201 (1460), and YCH017 (1075) must all be inside the range.
+- **`not {...} & ids`**: `&` gives the IDs in **both** sets. `not` requires that overlap to be empty, so none of gun005 (992, just outside), I8508 (6356), or NA20813 (0) can appear.
+- **`23089 - 3970`** is written as a subtraction on purpose: it shows the reasoning (all rows minus the present-day count from Phase 2) rather than an unexplained number.
+
+## 8.3: Run the tests
+
+```bash
+pytest -v
+```
+
+You should see **19 passed**: the previous 11, plus 6 toy tests and 2 real-data tests.
+
+## 8.4: An outside check on the result
+
+`exclude_present_day` leaves 23,089 − 3,970 = **19,119** rows. That number is familiar: the AADR visualizer page we found when looking up the v66 files reported that v66.0 contains **19,119 sequences representing 17,634 ancient individuals** (https://experience.arcgis.com/experience/244dbd2b96604e178d8a313743b86be5/page/Information). Your filter's row count matches a number published by an independent source.
+
+Check the second number too: how many **distinct people** remain after removing present-day individuals?
+
+```bash
+python -c "from aadrkit import load_anno; from aadrkit.filters import exclude_present_day; a = exclude_present_day(load_anno('data/raw/v66.p1_1240K.aadr.PUB.anno')); print(len(a), a['individual_id'].nunique())"
+```
+
+- **`len(a)`** is the number of rows, which should be 19,119.
+- **`a['individual_id'].nunique()`** is the number of distinct people.
+
+If the second number is **17,634**, your present-day filter agrees with AADR's own published counts on both measures. That's a strong outside confirmation for your report. The page describes v66.0 while your file is v66.p1, so a small difference would be possible from the patch. Since the row count already matches exactly, though, I'd expect this to match as well. If it doesn't, we'll look at what differs.
+
+### Commit
+
+```bash
+git add src/aadrkit/filters.py tests/test_filters.py
+```
+
+```bash
+git commit -m "Add date range, present-day, and reference genome filters with tests"
+```
+
+Paste the `pytest -v` summary and the two numbers from 8.4. Next comes Step 9: the region filters (country and coordinates), where the "report what you dropped" behavior first comes into play.
+- **Verificaiton:**

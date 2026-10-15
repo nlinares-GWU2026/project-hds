@@ -103,7 +103,6 @@ We don't know whether the `.anno` lists individuals in the same order as the `.i
 13. First piece of `aadrkit`: **Function that loads the `.anno` file correctly.** Every later feature (filters, deduplication, citation export) will start from what this loader returns. Part A: write the loader and tests that check its overall structure. Part B: Test the loaders values against hand verified `ground_truth.tsv`. Loader needs to: 1. Treat ".." as missing and only ".." and empty cells. 2. Give important columns short names. 3. Find those columns reliably despite long names. 4. Fail loudly if anything looks wrong rather than quietly loading the wrong column. 
 - Decision 1: How to find each column? - **By a short pattern matching the start of the name** because it is readable, tolerant of small changes, and can be checked for exactly one match. It will be matched against the beginning of the column name. **Each patterns must match exactly one column.** Error raised if matches *one or more than one*. This matters because `ASSESSMENT` and `ASSESSMENT WARNINGS` both start with the same word, so the pattern for column 47 is `ASSESSMENT$`. 
 - Decision 2: Only ".." and blanks count as missing. - pandas by default treats a whole list of strings as missing: "NA, N/A, null, None, etc." A real value could happen to be one of those and pandas would erase it silently. Loader will switch OFF the defaults `keep_default_na=False` and lists only AADR's own marker and empty cells. 
-## Current:
 14. First real function: loading anno file with all the decisions from your notes built in and tested against ground truth individuals.
 - Part A: Write the loader and check overall *structure*. Loader needs to 1) Treat ".." as missing and only those that are empty or "..". 2) Give the important columns short names. 3) Find those columns reliably, despite long names, a trailing space in one, a duplicate name, and two columns. 4) Fail loudly if anything looks wrong, rather than quietly loading the wrong column.
     - Decision 1: How to find each column - a regular expression for each column, matched against the beginning of the column name. The key safety rule is that each pattern must match exactly one column.
@@ -128,3 +127,13 @@ We don't know whether the `.anno` lists individuals in the same order as the `.i
 (Real data, Data assumptions)
 10. `test_zero_bp_means_present_day` - checks all 3,970 individuals dated 0 BP are labeled as "present", so the BP can safely mean present day.
 11. `test_reference_genomes` - checksi that exactly 4 rows (Ancestor, Chimp, Gorilla, human ref) are reference genomes, not people. 
+## Current:
+15. Writing the first filters (3): Each filter will be a small function that does one job: it takes the table from load_anno, and returns a new table containing only the rows that pass. This design has three advantages:
+- They combine freely. A full query becomes a chain: filter by date, then remove present-day individuals, then filter by country. Each step’s output feeds the next.
+- Each is easy to test on its own. One function, one job, a few clear tests.
+- They don’t change the original table. Each filter returns a new one, so you can’t accidentally lose data partway through a chain.
+This step builds three filters:
+1. filter_date_range: keep individuals dated between two values.
+2. exclude_present_day: remove present-day individuals.
+3. exclude_reference_genomes: remove the four .REF rows.
+**Present-day means exactly date_bp == 0, so Khwit is kept**
