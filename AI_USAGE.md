@@ -1693,7 +1693,7 @@ Paste the `pytest -v` output from step 4 and the failure message from step 5. Af
 ## Entry 9:
 - **Tool:** Cladue (Opus 5.5)
 - **What I was doing:** Creating the first filter functions.
-- **What I asked (verbatim):** "I need you to help me write a script that takes the table from `load_anno` and returns a new table containing only the rows that pass. Each filter will be a small function. Let's start with three filters: 1) a filter for date range that keeps individuals dated between two values, 2) a filter that excludes present day individuals, and 3) a filter that removes reference genomes. Important to note as a decision is that present day means exactly `date_bp == 0` so someone like Khwit is kept. 
+- **What I asked (verbatim):** "I need you to help me write a script that takes the table from `load_anno` and returns a new table containing only the rows that pass. Each filter will be a small function. Let's start with three filters: 1) a filter for date range that keeps individuals dated between two values, 2) a filter that excludes present day individuals, and 3) a filter that removes reference genomes. Important to note as a decision is that present day means exactly `date_bp == 0` so someone like Khwit is kept. I would like to then do a toy tests to test these beginning filters. Build a table that tests each edge case(present  day, post 1950, sits exactly on a boundary years, missing date, and ref genome).
 - **Exact output (verbatim):**
 Excellent. You've now seen the ground truth test fail on a real bug and pass on the fix, so you know it actually guards the loader.
 
@@ -1788,7 +1788,7 @@ def exclude_reference_genomes(anno):
 - **`~`** means NOT, as before. So this keeps rows whose ID does **not** end in `.REF`.
 - The references are also dated 0 BP, so `exclude_present_day` happens to remove them too. They're still separate functions, because a researcher might want present-day individuals **without** the chimpanzee and gorilla references.
 
-## 8.2: Write the tests
+### Write the tests
 
 Create `tests/test_filters.py`. This file uses **two kinds of tests**, and that's worth understanding:
 
@@ -1889,7 +1889,7 @@ This fixture has no `scope`, so it's rebuilt fresh for every test. Building a si
 - **`not {...} & ids`**: `&` gives the IDs in **both** sets. `not` requires that overlap to be empty, so none of gun005 (992, just outside), I8508 (6356), or NA20813 (0) can appear.
 - **`23089 - 3970`** is written as a subtraction on purpose: it shows the reasoning (all rows minus the present-day count from Phase 2) rather than an unexplained number.
 
-## 8.3: Run the tests
+### Run the tests
 
 ```bash
 pytest -v
@@ -1897,7 +1897,7 @@ pytest -v
 
 You should see **19 passed**: the previous 11, plus 6 toy tests and 2 real-data tests.
 
-## 8.4: An outside check on the result
+### An outside check on the result
 
 `exclude_present_day` leaves 23,089 − 3,970 = **19,119** rows. That number is familiar: the AADR visualizer page we found when looking up the v66 files reported that v66.0 contains **19,119 sequences representing 17,634 ancient individuals** (https://experience.arcgis.com/experience/244dbd2b96604e178d8a313743b86be5/page/Information). Your filter's row count matches a number published by an independent source.
 
@@ -1922,5 +1922,12 @@ git add src/aadrkit/filters.py tests/test_filters.py
 git commit -m "Add date range, present-day, and reference genome filters with tests"
 ```
 
-Paste the `pytest -v` summary and the two numbers from 8.4. Next comes Step 9: the region filters (country and coordinates), where the "report what you dropped" behavior first comes into play.
+Paste the `pytest -v` summary and the two numbers.
+- **Verificaiton:** I typed up the script and logically walked through it. I ran pytest and all 19 tests (including the others I built previously) passed successfully. I also ran the command to see how many distinct people reamined after removing present day individuals and the numbers 19,119 and 17,634 returned showing that my present day filter agrees with AADR's own published counts on both measures (rows and number of distinct people).
+
+## Entry 10: 
+- **Tool:** Claude (Opus 5.5)
+- **What I was doing:** Writing region (country and coordinates) filters.
+- **What I asked (verbatim):**
+- **Exact output (verbatim):**
 - **Verificaiton:**

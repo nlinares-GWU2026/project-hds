@@ -127,7 +127,6 @@ We don't know whether the `.anno` lists individuals in the same order as the `.i
 (Real data, Data assumptions)
 10. `test_zero_bp_means_present_day` - checks all 3,970 individuals dated 0 BP are labeled as "present", so the BP can safely mean present day.
 11. `test_reference_genomes` - checksi that exactly 4 rows (Ancestor, Chimp, Gorilla, human ref) are reference genomes, not people. 
-## Current:
 15. Writing the first filters (3): Each filter will be a small function that does one job: it takes the table from load_anno, and returns a new table containing only the rows that pass. This design has three advantages:
 - They combine freely. A full query becomes a chain: filter by date, then remove present-day individuals, then filter by country. Each step’s output feeds the next.
 - Each is easy to test on its own. One function, one job, a few clear tests.
@@ -137,3 +136,6 @@ This step builds three filters:
 2. exclude_present_day: remove present-day individuals.
 3. exclude_reference_genomes: remove the four .REF rows.
 **Present-day means exactly date_bp == 0, so Khwit is kept**
+I ran pytest and all 19 tests (including the others I built previously) passed successfully. I also ran the command to see how many distinct people reamined after removing present day individuals and the numbers 19,119 and 17,634 returned showing that my present day filter agrees with AADR's own published counts on both measures (rows and number of distinct people).
+## Current:
+16. Region filters: 
