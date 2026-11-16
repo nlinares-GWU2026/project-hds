@@ -45,20 +45,22 @@ def filter_country(anno, countries):
     otherwise exact: AADR records some territories separately (for example, "Canary Islands" is not part of "Spain").
     Use list_values(anno, "country") to see the available labels. Rows with a missing country are never kept."""
 
-    if isinstance(countries, str):
+    if isinstance(countries, str): # Checks whether user passed single name like "Spain" instead of a list. If so, wrapped in a list. 
+        # Prevents Python from treating the string as a sequence of letters 
         countries = [countries]
-    wanted = {c.strip().casefold() for c in countries}
+    wanted = {c.strip().casefold() for c in countries} # Set comprehension. Accidental spaces, conversion to lowercase for each name
     present = anno["country"].str.casefold()
-    for name in sorted(wanted - set(present.dropna())):
-        warnings.warn(
+    for name in sorted(wanted - set(present.dropna())): # Country column converted to lowercase so both sides of the comparison use the same capitalization
+        # Set subtraction, requested names that don't appear in the table at all
+        warnings.warn( # For each one, issues a warning that points user to list_values
             f"No rows with country {name!r}; check spelling with "
             f"list_values(anno, 'country')",
             UserWarning,
-            stacklevel=2,
+            stacklevel=2, # Warning points to user's own line that called filter_country
         )
-    return anno[present.isin(wanted)]
+    return anno[present.isin(wanted)] # Is true for rows whose country is in the requested set. Missing countries are never in the set so rows never kept. 
 
-def filter_bouding_box(anno, min_lat=None, max_lat=None, min_lon=None, max_lon=None):
+def filter_bounding_box(anno, min_lat=None, max_lat=None, min_lon=None, max_lon=None):
     """Keep individuals whose coordinates fall inside a latitude/longitude box.
     
     Bounds are inclusive, and any bound can be None for no limit. If min_long is 
@@ -67,18 +69,18 @@ def filter_bouding_box(anno, min_lat=None, max_lat=None, min_lon=None, max_lon=N
     """
 
     for name, value, limit in [("min_lat", min_lat, 90), ("max_lat", max_lat, 90),
-                               ("min_lon", min_lon, 180), ("max_lon", max_lon, 180)]:
+                               ("min_lon", min_lon, 180), ("max_lon", max_lon, 180)]: # Checks each given bound against its legal range
         if value is not None and not -limit <= value <= limit:
             raise ValueError(f"{name} must be between {-limit} and {limit}, got {value}")
     if min_lat is not None and max_lat is not None and min_lat > max_lat:
         raise ValueError(f"min_lat ({min_lat}) is greater than max_lat ({max_lat})")
 
-    keep = pd.Series(True, index=anno.index)
+    keep = pd.Series(True, index=anno.index) # Start with all True and narrow with &=
     if min_lat is not None:
         keep &= anno["lat"] >= min_lat
     if max_lat is not None:
         keep &= anno["lat"] <= max_lat
-    if min_lon is not None and max_lon is not None and min_lon > max_lon:
+    if min_lon is not None and max_lon is not None and min_lon > max_lon: # If min_lon > max_lon, the box crosses the 180 deg line, so a row is kept if it's on either side. Otherwise, its an ordinary range handled like lat
         keep &= (anno["lon"] >= min_lon) | (anno["lon"] <= max_lon)
     else:
         if min_lon is not None:

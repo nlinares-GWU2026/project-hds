@@ -1932,5 +1932,257 @@ Paste the `pytest -v` summary and the two numbers.
 - Will raise warnings (like if a valid country is chosen to filter but is not in the subset) and errors (like mispelling a country).
 - Each filter will remain simple and just return rows. Reporting what was dropped will happen in top-level function that runs the whole query, where it can count before and after every filter in one place."
 - **Exact output (verbatim):**
+This step adds two ways to select individuals by place, plus a helper for discovering valid labels:
 
+1. **`filter_country`**: keep individuals from one or more countries.
+2. **`filter_bounding_box`**: keep individuals whose coordinates fall inside a rectangle on the map.
+3. **`list_values`**: show every label in a column (such as all 145 countries), so users can see the exact spellings before filtering.
+
+Both filters use:
+
+| Finding | Design decision |
+|---|---|
+| AADR lists some territories separately ("Canary Islands" isn't "Spain") | Match AADR's labels exactly, and provide `list_values` so users can see them |
+| Capitalization shouldn't matter to a user | Case-insensitive matching |
+| 784 individuals have no coordinates, but most of those do have a country | Bounding-box filter excludes them; country filter still finds them |
+| Some data comes from the Pacific (Tonga, Vanuatu) | The bounding box must handle regions that cross the 180° longitude line |
+
+### Two new ideas in this step
+
+**Warnings vs. errors.** If a user asks for a country that isn't in the table, there are two possible reasons:
+
+- **A typo**, like "Spian." That's a mistake.
+- **A valid country that just isn't in this subset**, for example if they already filtered to 3000–5000 BP and no one from Greenland falls in that range. That's not a mistake at all.
+
+An error would be wrong in the second case. So the filter issues a **warning** instead: a message that appears on screen but doesn't stop the program. A useful rule: **raise an error when something is definitely wrong; warn when it might be.**
+
+**Crossing the 180° line.** Longitude runs from −180 to 180, and those two values are the same line on a globe, running through the Pacific. A box covering Tonga (about −175) and Vanuatu (about 167) has to "wrap around" that line. The convention is: if `min_lon` is *larger* than `max_lon`, the box crosses the 180° line. So `min_lon=160, max_lon=-170` means "from 160° east, across the line, to 170° west." Latitude never wraps, so a reversed latitude range is an error.
+
+**One thing deliberately left out:** the message "784 individuals have no coordinates and were excluded." Each filter stays simple and just returns rows. Reporting what was dropped will happen in the top-level function that runs the whole query, where it can count before and after every filter in one place. I've added it to the plan so it isn't forgotten.
+
+### Add `list_values` to `anno.py`
+
+Add this to the bottom of `src/aadrkit/anno.py`:
+
+```python
+def list_values(anno, column):
+    """Return each distinct value in a column with its row count, most common first.
+
+    Missing values are not listed. Useful for finding the exact labels to
+    pass to a filter, e.g. list_values(anno, "country").
+    """
+    return anno[column].value_counts()
+```
+
+It's the same `value_counts()` you used before, now packaged as part of the tool with a docstring explaining when to use it.
+
+Update `src/aadrkit/__init__.py` so users can reach it directly:
+
+```python
+from aadrkit.anno import list_values, load_anno
+```
+
+### Add the region filters to `filters.py`
+
+Add `import warnings` near the top of `src/aadrkit/filters.py`, next to `import pandas as pd`. Then add these two functions at the bottom:
+
+```python
+def filter_country(anno, countries):
+    """Keep individuals whose country (AADR "Political Entity") is in `countries`.
+
+    `countries` can be one name or a list of names. Matching ignores
+    capitalization but is otherwise exact: AADR records some territories
+    separately (for example, "Canary Islands" is not part of "Spain").
+    Use list_values(anno, "country") to see the available labels.
+    Rows with a missing country are never kept.
+    """
+    if isinstance(countries, str):
+        countries = [countries]
+    wanted = {c.strip().casefold() for c in countries}
+    present = anno["country"].str.casefold()
+    for name in sorted(wanted - set(present.dropna())):
+        warnings.warn(
+            f"No rows with country {name!r}; check spelling with "
+            f"list_values(anno, 'country')",
+            UserWarning,
+            stacklevel=2,
+        )
+    return anno[present.isin(wanted)]
+
+
+def filter_bounding_box(anno, min_lat=None, max_lat=None, min_lon=None, max_lon=None):
+    """Keep individuals whose coordinates fall inside a latitude/longitude box.
+
+    Bounds are inclusive, and any bound can be None for no limit. If
+    min_lon is greater than max_lon, the box crosses the 180-degree line
+    (e.g. min_lon=160, max_lon=-170 covers the central Pacific).
+    Individuals with missing coordinates are excluded whenever a bound is given.
+    """
+    for name, value, limit in [("min_lat", min_lat, 90), ("max_lat", max_lat, 90),
+                               ("min_lon", min_lon, 180), ("max_lon", max_lon, 180)]:
+        if value is not None and not -limit <= value <= limit:
+            raise ValueError(f"{name} must be between {-limit} and {limit}, got {value}")
+    if min_lat is not None and max_lat is not None and min_lat > max_lat:
+        raise ValueError(f"min_lat ({min_lat}) is greater than max_lat ({max_lat})")
+
+    keep = pd.Series(True, index=anno.index)
+    if min_lat is not None:
+        keep &= anno["lat"] >= min_lat
+    if max_lat is not None:
+        keep &= anno["lat"] <= max_lat
+    if min_lon is not None and max_lon is not None and min_lon > max_lon:
+        keep &= (anno["lon"] >= min_lon) | (anno["lon"] <= max_lon)
+    else:
+        if min_lon is not None:
+            keep &= anno["lon"] >= min_lon
+        if max_lon is not None:
+            keep &= anno["lon"] <= max_lon
+    return anno[keep]
+```
+
+### How `filter_country` works
+
+- **`isinstance(countries, str)`** checks whether the user passed a single name like `"Spain"` instead of a list. If so, it's wrapped in a list. Without this, Python would treat the string as a sequence of letters, and the filter would search for countries named "S", "p", "a", "i", "n." It's a classic Python bug, and this line prevents it.
+- **`{c.strip().casefold() for c in countries}`** is a **set comprehension**, like the list comprehensions you've used but with curly braces, producing a set. For each name, `.strip()` removes accidental spaces at either end, and `.casefold()` converts it to lowercase. `casefold` is a slightly stronger version of `lower` that also handles letters from other languages correctly.
+- **`present`** is the country column converted to lowercase, so both sides of the comparison use the same capitalization. Missing countries stay missing.
+- **`wanted - set(present.dropna())`** is set subtraction: requested names that don't appear in the table at all. For each one, `warnings.warn(...)` issues a warning that points the user to `list_values`.
+  - **`UserWarning`** is the standard category for warnings meant for the person using the code.
+  - **`stacklevel=2`** makes the warning point at the user's own line that *called* `filter_country`, rather than at a line inside `aadrkit`. That's the line they actually need to look at.
+- **`present.isin(wanted)`** is true for rows whose country is in the requested set. Missing countries are never in the set, so those rows are never kept.
+
+### How `filter_bounding_box` works
+
+- **The validation loop** checks each given bound against its legal range: ±90 for latitude, ±180 for longitude. Writing the four checks as one loop over a small list avoids four nearly identical `if` statements. `not -limit <= value <= limit` reads as "the value is not between −limit and +limit."
+- **Reversed latitude** is an error, since latitude can't wrap around.
+- **The `keep` pattern** is the same one as `filter_date_range`: start with all `True` and narrow with `&=`.
+- **The longitude part has two branches:**
+  - **If `min_lon > max_lon`**, the box crosses the 180° line, so a row is kept if it's on **either** side: east of `min_lon` **or** west of `max_lon`. `|` means OR.
+  - **Otherwise**, it's an ordinary range, handled just like latitude.
+- **Missing coordinates** fail every comparison, so those rows are dropped whenever any bound is given, as the docstring says.
+
+### Write the tests
+
+Add these to `tests/test_filters.py`. First, extend the import at the top:
+
+```python
+import pytest
+import pandas as pd
+
+from aadrkit.anno import list_values
+from aadrkit.filters import (
+    exclude_present_day,
+    exclude_reference_genomes,
+    filter_bounding_box,
+    filter_country,
+    filter_date_range,
+)
+```
+
+Then add a second toy fixture and the new tests at the bottom:
+
+```python
+@pytest.fixture
+def places():
+    """A tiny hand-made table covering the region edge cases."""
+    return pd.DataFrame({
+        "genetic_id": ["A", "B", "C", "D", "E", "F", "G"],
+        "country": ["Spain", "Canary Islands", "United Kingdom", "Tonga",
+                    "Vanuatu", float("nan"), "Uzbekistan"],
+        "lat": [40.0, 28.0, 59.1, -21.2, -15.4, float("nan"), float("nan")],
+        "lon": [-3.0, -15.5, -3.0, -175.2, 167.0, float("nan"), float("nan")],
+    })
+
+
+# --- Region: toy-table tests ---
+
+def test_country_ignores_capitalization_and_territories(places):
+    assert list(filter_country(places, "spain")["genetic_id"]) == ["A"]
+
+
+def test_country_accepts_a_list(places):
+    result = filter_country(places, ["Spain", "United Kingdom"])
+    assert list(result["genetic_id"]) == ["A", "C"]
+
+
+def test_country_finds_individuals_without_coordinates(places):
+    assert list(filter_country(places, "Uzbekistan")["genetic_id"]) == ["G"]
+
+
+def test_country_warns_about_unknown_names(places):
+    with pytest.warns(UserWarning, match="spian"):
+        result = filter_country(places, "Spian")
+    assert result.empty
+
+
+def test_bounding_box_basic(places):
+    result = filter_bounding_box(places, min_lat=35, max_lat=60, min_lon=-10, max_lon=0)
+    assert list(result["genetic_id"]) == ["A", "C"]
+
+
+def test_bounding_box_crosses_180_degrees(places):
+    result = filter_bounding_box(places, min_lon=160, max_lon=-170)
+    assert list(result["genetic_id"]) == ["D", "E"]
+
+
+def test_bounding_box_rejects_invalid_bounds(places):
+    with pytest.raises(ValueError):
+        filter_bounding_box(places, min_lat=-100)
+    with pytest.raises(ValueError):
+        filter_bounding_box(places, min_lat=60, max_lat=35)
+
+
+# --- Region: real-data tests ---
+
+def test_country_on_real_data(anno):
+    spain = filter_country(anno, "Spain")
+    assert len(spain) == list_values(anno, "country")["Spain"] == 802
+    assert "gun005.SG" not in set(spain["genetic_id"])               # Canary Islands
+    assert "gun005.SG" in set(filter_country(anno, "canary islands")["genetic_id"])
+
+
+def test_whole_world_box_excludes_missing_coordinates(anno):
+    world = filter_bounding_box(anno, min_lat=-90, max_lat=90, min_lon=-180, max_lon=180)
+    assert len(world) == 23089 - 784
+    assert not {"I8508.AG", "Khwit.SG", "Chimp.REF"} & set(world["genetic_id"])
+```
+
+### What the tests check
+
+**The `places` fixture** includes every region edge case:
+- **A and B:** Spain versus the Canary Islands.
+- **C:** a second country, for testing lists.
+- **D and E:** Tonga and Vanuatu, on opposite sides of the 180° line.
+- **F:** missing everything.
+- **G:** a country but no coordinates, like I8508.
+
+**The toy tests:**
+- **Capitalization and territories:** lowercase `"spain"` finds A but not B.
+- **Lists:** two countries in one call.
+- **No coordinates:** G is found by country even though it has no coordinates. This is the "country filter as a fallback" behavior from your notes.
+- **`pytest.warns(UserWarning, match="spian")`** works like `pytest.raises`, but for warnings. `match` also checks that the warning message contains the misspelled name, so the user would know exactly which name was wrong. `result.empty` is true when the table has no rows.
+- **Ordinary box:** A (Spain) and C (UK) are inside; B (Canary Islands, at −15.5° longitude) is just outside the west edge.
+- **Crossing 180°:** D (−175.2) and E (167.0) are both found, even though they're numerically far apart.
+- **Invalid bounds:** an impossible latitude and a reversed latitude range both raise errors.
+
+**The real-data tests:**
+- **Spain:** **802** is the count you saw in the previous top-ten list. The chained comparison `a == b == 802` checks that the filter, `list_values`, and your earlier profiling all agree. Then it checks that gun005 isn't in Spain but *is* found under "canary islands," written in lowercase on purpose.
+- **Whole-world box:** a box covering the entire planet should return every individual *with* coordinates, which is exactly **23,089 − 784**. Your three test individuals without coordinates must be absent.
+
+### Run and commit
+
+```bash
+pytest -v
+```
+
+You should see **28 passed**: the previous 19, plus 7 toy tests and 2 real-data tests.
+
+```bash
+git add src/aadrkit/anno.py src/aadrkit/__init__.py src/aadrkit/filters.py tests/test_filters.py
+```
+
+```bash
+git commit -m "Add country and bounding-box filters, list_values helper, and tests"
+```
+
+Paste the `pytest -v` summary.
 - **Verificaiton:**
