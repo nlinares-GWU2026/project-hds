@@ -1928,6 +1928,9 @@ Paste the `pytest -v` summary and the two numbers.
 ## Entry 10: 
 - **Tool:** Claude (Opus 5.5)
 - **What I was doing:** Writing region (country and coordinates) filters.
-- **What I asked (verbatim):**
+- **What I asked (verbatim):** "I need you to help me write script that does the following:" (pasted from `anno_notes.md`): Region filters: Adds two ways to select individuals by place, plus a helper for discovering valid labels: 1) `filter_country`: keep individuals from one or more countries, 2) `filter_bounding_box`: keep individuals whose coordinateds fall inside a rectangle on the map, 3) `list_values`: show every label in a column (such as all 145 countries), so user can see the exact spellings before filtering. Design decisions: match AADR's labels exactly and provide `list_values` so users can see them, case insensitive matching, bounding-box filter excludes individuals who have no coordinates but the country filter still finds them, the bounding box must handle regions that cross the 180 degree longitude line because some data comes from the Pacific (longitude runs -180 to 180 and those two values are the same on a globe, so a box covering Tonga (~ -175) and Vanuatu (~ 167) has to "wrap around" that line. if `min_long` is larger than `max_long`, the box crosses the 180 degree line). 
+- Will raise warnings (like if a valid country is chosen to filter but is not in the subset) and errors (like mispelling a country).
+- Each filter will remain simple and just return rows. Reporting what was dropped will happen in top-level function that runs the whole query, where it can count before and after every filter in one place."
 - **Exact output (verbatim):**
+
 - **Verificaiton:**

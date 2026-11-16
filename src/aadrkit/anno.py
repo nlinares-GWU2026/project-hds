@@ -66,4 +66,12 @@ def load_anno(path):
     anno.columns = list(columns.keys()) # Swaps the long names for short ones
     return anno
 
+def list_values(anno, column): 
+    """Return each distinct value in a column with its row count, most common first.
+    
+    Missing values are not listed. Useful for finding the exact labels to pass to a filter
+    like list_values(anno, "country").
+    """
+    return anno[column].value_counts()
+
     
