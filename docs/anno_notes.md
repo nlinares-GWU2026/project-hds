@@ -136,6 +136,6 @@ This step builds three filters:
 2. exclude_present_day: remove present-day individuals.
 3. exclude_reference_genomes: remove the four .REF rows.
 **Present-day means exactly date_bp == 0, so Khwit is kept**
-I ran pytest and all 19 tests (including the others I built previously) passed successfully. I also ran the command to see how many distinct people reamined after removing present day individuals and the numbers 19,119 and 17,634 returned showing that my present day filter agrees with AADR's own published counts on both measures (rows and number of distinct people).
+I ran pytest and all 19 tests (including the others I built previously) passed successfully. I also ran the command to see how many distinct people reamined after removing present day individuals and the numbers 19,119 and 17,630 returned showing that my present day filter agrees with AADR's own published counts on both measures (rows and number of distinct people) almost exactly (it truly showed 17,630). The most likely explanation is that the v66.p1 patch merged duplicate individuals however this was not verified. 
 ## Current:
 16. Region filters: 
