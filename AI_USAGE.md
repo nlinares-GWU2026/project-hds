@@ -2576,7 +2576,7 @@ Paste the `pytest -v` summary.
 - **Tool:** Claude (Opus 5.5)
 - **What I was doing:** Creating deduplication and coverage filters.        
 - **What I asked (verbatim):** Can you write me code chunks that will achieve the following criteria for coverage and deduplication filtering: 
-Coverage and deduplication filter: The coverage filter keeps individuals with at least a given number of SNPs covered but the threshold has no default value. The min number depends on the analysis. Python will refuse to run until a number is given. The deduplication filter keeps one row per person, choosing which has the most SNPs. From previously, 23,089 rows belong to 21,433 people. Follow these rules: 1. pick the row with the most SNPs, 2. Break ties consistently if rows have exactly the same SNP count, the function must pick the same one every time (RULE = ALPHABETICAL), 3. Do not merge rows with a missing individual ID because there is no way to know whether they are the same person if two rows both lack an ID. Deduplication happens after filtering so best row is chosen among rows that passed.  
+Coverage and deduplication filter: The coverage filter keeps individuals with at least a given number of SNPs covered but the threshold has no default value. The min number depends on the analysis. Python will refuse to run until a number is given. The deduplication filter keeps one row per person, choosing which has the most SNPs. From previously, 23,089 rows belong to 21,433 people. Follow these rules: 1. pick the row with the most SNPs, 2. Break ties consistently if rows have exactly the same SNP count, the function must pick the same one every time (RULE = ALPHABETICAL), 3. Do not merge rows with a missing individual ID because there is no way to know whether they are the same person if two rows both lack an ID. Deduplication happens after filtering so best row is chosen among rows that passed. Deduplication rules: one person, two datasets (keep higher SNPs), one person one row (keep), tie (Keep alphabetical first), and no individual id (keep both). 
 - **Exact output (verbatim):**
 ### Coverage filter and deduplication
 
@@ -2594,7 +2594,7 @@ There's one important design decision: **the threshold has no default value**. T
 2. **Break ties consistently.** If two rows have exactly the same SNP count, the function must pick the same one every time, or rerunning the same query could produce different files, which would break reproducibility. The rule: the alphabetically first Genetic ID wins.
 3. **Never merge rows with a missing Individual ID.** If two rows both lack an ID, there's no way to know whether they're the same person, so both are kept. v66.p1 has no missing IDs, but the function shouldn't silently merge strangers if a future version does.
 
-**When to deduplicate:** in your earlier design, you decided **filter first, then deduplicate**, so the best row is chosen among rows that passed the user's filters. For the coverage filter specifically, the order happens not to matter: keeping each person's best row and then applying a threshold gives the same result as applying the threshold first. But it does matter for other filters. For example, if one person's rows had different data types, deduplicating first could keep a row that a later filter removes, losing that person entirely. The top-level function can enforce the correct order, so users don't have to remember it.
+**When to deduplicate:** you decided **filter first, then deduplicate**, so the best row is chosen among rows that passed the user's filters. For the coverage filter specifically, the order happens not to matter: keeping each person's best row and then applying a threshold gives the same result as applying the threshold first. But it does matter for other filters. For example, if one person's rows had different data types, deduplicating first could keep a row that a later filter removes, losing that person entirely. The top-level function can enforce the correct order, so users don't have to remember it.
 
 ### Add both functions to `filters.py`
 
@@ -2776,4 +2776,301 @@ git commit -m "Add coverage filter and deduplication with tests"
 ```
 
 Paste the `pytest -v` summary when it's done.
-- **Verificaiton:**
+- **Verificaiton:** I wrote the code, manually thought about the process and workthrough, ran the tests, verified all had passed.
+
+## Entry 13:
+- **Tool:** Cladue (Opus 5.5)
+- **What I was doing:** Creating and testing a top level function.
+- **What I asked (verbatim):** ""Choosing" function: I want to add in a top level function now that calls each filter in the correct order every time (for consistency) that is: min bp, max bp, groups, min snps. Create a new script that runs the selection in order from the filter script functions that we have created and turns it into a report that is then turned into a dataframe at the end. Have it trim the dataset as each step progresses. If a certain filter is left blank, have it be skipped. Remove outliers explicitly and make sure deduplication is last. Then, can you create a script that test to make sure that the function connects/integrates the filtering tests correctly. Check the defaults (no options at all), that every person is unique and appears once, and that the ref genomes are gone. Enable that only the requested steps are run, make sure that the filters are in the correct order if run manually vs running through the choosing function, identify the correct amount of missing coordinates (784), handles the outliers correctly, and handles misspells. Add any design tweaks or additions you deem necessary for this to work smoothly."
+- **Exact output (verbatim):**
+Fifty passing tests means every filter is checked against both edge cases and your hand-verified individuals. Now we connect them.
+
+### The top-level `select()` function
+
+Right now, a user would have to call each filter themselves, in the right order, and remember the defaults. **`select()`** does all of that in one call:
+
+```python
+selected, report = aadrkit.select(anno, min_bp=1000, max_bp=1500,
+                                  groups="Scotland_Viking", min_snps=100000)
+```
+
+It does three things the individual filters don't:
+
+1. **Runs the filters in a fixed order.** Deduplication always comes last, as you decided, so each person's best row is chosen from the rows that passed every other filter.
+2. **Applies the defaults** from your design: reference genomes are excluded, outliers are excluded from population matches, and each person appears once. Each default can be switched off explicitly.
+3. **Reports what each step removed.** This is where the transparency promise is kept, including "784 had no coordinates."
+
+### Why a fixed order matters even though most filters don't care
+
+Apart from deduplication, the filters give the **same final rows in any order**: keeping "Iron Age" then "Poland" gives the same people as "Poland" then "Iron Age." But the **report** would differ, because each step's "removed" count depends on what came before it. A fixed order means the same query always produces the same result **and** the same report, which is what reproducibility requires.
+
+### Two new Python ideas
+
+- **Keyword-only arguments.** A `*` in the function definition means every argument after it **must be named**. So `select(anno, 3000, 5000)` is rejected, and you must write `select(anno, min_bp=3000, max_bp=5000)`. With this many numeric options, positional numbers would be an easy way to swap a date for a latitude without noticing. A misspelled name like `min_snp=` also raises an error instead of being silently ignored.
+- **Returning two things.** `select` returns a **tuple**, two values bundled together: the selected rows and the report table. You unpack them with `selected, report = select(...)`. The report is a normal DataFrame, so later it can be saved alongside the output files as a record of how each subset was made.
+
+### Write `query.py`
+
+Create `src/aadrkit/query.py`. It's named `query.py` rather than `select.py` because Python's standard library already has a module called `select`, and avoiding the name prevents confusion.
+
+```python
+"""Run a full AADR selection: filters in a fixed order, sensible defaults, and a report."""
+import pandas as pd
+
+from aadrkit.filters import (
+    deduplicate_individuals,
+    exclude_present_day,
+    exclude_reference_genomes,
+    filter_bounding_box,
+    filter_country,
+    filter_date_range,
+    filter_group,
+    filter_min_snps,
+    is_outlier,
+)
+
+REPORT_COLUMNS = ["step", "rows_before", "rows_after", "removed", "note"]
+
+
+def _record(report, step, before, after, note=""):
+    """Add one row to the selection report."""
+    report.append({
+        "step": step,
+        "rows_before": len(before),
+        "rows_after": len(after),
+        "removed": len(before) - len(after),
+        "note": note,
+    })
+
+
+def select(anno, *, min_bp=None, max_bp=None, exclude_present=False,
+           countries=None, min_lat=None, max_lat=None, min_lon=None, max_lon=None,
+           groups=None, group_regex=False, include_outliers=False,
+           min_snps=None, include_references=False, deduplicate=True,
+           verbose=True):
+    """Select individuals from a load_anno() table.
+
+    Steps run in a fixed order, so the same arguments always give the same
+    result and the same report:
+      1. reference genomes removed (unless include_references=True)
+      2. present-day individuals removed (if exclude_present=True)
+      3. date range        (min_bp, max_bp)
+      4. country           (countries)
+      5. coordinates       (min_lat, max_lat, min_lon, max_lon)
+      6. population        (groups, group_regex, include_outliers)
+      7. coverage          (min_snps)
+      8. one row per person (unless deduplicate=False); always last
+
+    Steps whose arguments are not given are skipped. Outliers only matter
+    in the population step, where they are excluded unless
+    include_outliers=True. All arguments after `anno` must be named.
+
+    Returns (selected, report): the selected rows, and a table of how many
+    rows each step removed. The report is also printed if verbose=True.
+    """
+    report = []
+    current = anno
+
+    if not include_references:
+        before, current = current, exclude_reference_genomes(current)
+        _record(report, "exclude reference genomes", before, current)
+
+    if exclude_present:
+        before, current = current, exclude_present_day(current)
+        _record(report, "exclude present-day", before, current)
+
+    if min_bp is not None or max_bp is not None:
+        before, current = current, filter_date_range(current, min_bp, max_bp)
+        _record(report, f"date range (min_bp={min_bp}, max_bp={max_bp})", before, current)
+
+    if countries is not None:
+        before, current = current, filter_country(current, countries)
+        _record(report, f"country {countries}", before, current)
+
+    bounds = dict(min_lat=min_lat, max_lat=max_lat, min_lon=min_lon, max_lon=max_lon)
+    if any(value is not None for value in bounds.values()):
+        no_coords = int((current["lat"].isna() | current["lon"].isna()).sum())
+        before, current = current, filter_bounding_box(current, **bounds)
+        _record(report, "coordinates", before, current, f"{no_coords} had no coordinates")
+
+    if groups is not None:
+        before = current
+        matched = filter_group(current, groups, include_outliers=True, regex=group_regex)
+        outliers = is_outlier(matched["group_id"])
+        if include_outliers:
+            current, note = matched, "outliers included"
+        else:
+            current, note = matched[~outliers], f"{int(outliers.sum())} outliers excluded"
+        _record(report, f"group {groups}", before, current, note)
+
+    if min_snps is not None:
+        before, current = current, filter_min_snps(current, min_snps)
+        _record(report, f"at least {min_snps} SNPs", before, current)
+
+    if deduplicate:
+        before, current = current, deduplicate_individuals(current)
+        _record(report, "one row per person", before, current)
+
+    report = pd.DataFrame(report, columns=REPORT_COLUMNS)
+    if verbose:
+        print(report.to_string(index=False))
+        print(f"Selected {len(current)} rows.")
+    return current, report
+```
+
+### How it works
+
+**`_record`** adds one row to the report: the step's name, the row counts before and after, how many were removed, and an optional note.
+- **The leading underscore** is a Python convention meaning "internal helper, not for users." It's a signal rather than a restriction.
+- **The report starts as a list of dictionaries** (`report = []`), and each step appends one. At the end, `pd.DataFrame(report, columns=REPORT_COLUMNS)` turns the list into a table. Passing `columns` keeps the column order fixed, and gives the right columns even if no steps ran at all.
+
+**`current`** always holds "the rows that have survived so far." Each step takes `current`, filters it, and replaces it.
+
+**`before, current = current, exclude_reference_genomes(current)`** updates two variables in one line. Python evaluates the **whole right side first** (the old `current`, and the filtered result), *then* assigns them: `before` gets the old table and `current` gets the new one. It's the same as writing `before = current` and then `current = exclude_reference_genomes(current)` on separate lines. Every step then has both tables available to compare.
+
+**Each step is wrapped in an `if`**, so it only runs when its arguments were given. Steps that don't run don't appear in the report.
+
+**The coordinate step:**
+- **`bounds = dict(...)`** gathers the four coordinate arguments into one dictionary.
+- **`any(value is not None for value in bounds.values())`** is true if at least one bound was given.
+- **`no_coords`** counts rows missing latitude **or** longitude **before** filtering. That's the "784 had no coordinates" message, placed exactly where you planned it in Phase 2.
+- **`filter_bounding_box(current, **bounds)`**: the `**` **unpacks** the dictionary into named arguments. It's equivalent to writing `min_lat=min_lat, max_lat=max_lat, ...` by hand.
+
+**The population step** works slightly differently, so it can report how many outliers it removed:
+1. It calls `filter_group` with `include_outliers=True`, getting **everyone** in the matching groups.
+2. `is_outlier` marks which of those are outliers.
+3. Depending on `include_outliers`, it either keeps them all or removes the outliers, and the note records the count.
+
+Calling `filter_group` only once also means any "unknown group" warning appears once, not twice.
+
+**Deduplication runs last**, unconditionally in position, so it always sees the fully filtered rows.
+
+**`verbose`**: when true (the default), the report is printed. Showing what was removed by default fits your transparency principle, and a user who wants quiet output can pass `verbose=False`.
+
+### Make `select` available from the package
+
+Update `src/aadrkit/__init__.py`:
+
+```python
+"""aadrkit: filter and export subsets of the Allen Ancient DNA Resource (AADR)."""
+
+from aadrkit.anno import list_values, load_anno
+from aadrkit.query import select
+
+__version__ = "0.1.0"
+```
+
+### Write the tests
+
+The individual filters are already tested in detail. These tests check something different: that `select` **connects** them correctly. That's the difference between **unit tests** (one function on its own) and **integration tests** (several pieces working together).
+
+Create `tests/test_query.py`:
+
+```python
+import pandas as pd
+import pytest
+
+from aadrkit.filters import (
+    deduplicate_individuals,
+    exclude_present_day,
+    exclude_reference_genomes,
+    filter_min_snps,
+)
+from aadrkit.query import select
+
+
+def test_defaults_remove_references_and_duplicates(anno):
+    selected, report = select(anno, verbose=False)
+    ids = set(selected["genetic_id"])
+    assert not any(i.endswith(".REF") for i in ids)
+    assert selected["individual_id"].is_unique
+    assert list(report["step"]) == ["exclude reference genomes", "one row per person"]
+    assert report.loc[0, "removed"] == 4
+
+
+def test_only_requested_steps_run(anno):
+    _, report = select(anno, min_snps=100000, verbose=False)
+    assert list(report["step"]) == [
+        "exclude reference genomes", "at least 100000 SNPs", "one row per person",
+    ]
+
+
+def test_matches_filters_applied_by_hand(anno):
+    selected, _ = select(anno, exclude_present=True, min_snps=20000, verbose=False)
+    by_hand = deduplicate_individuals(
+        filter_min_snps(exclude_present_day(exclude_reference_genomes(anno)), 20000)
+    )
+    pd.testing.assert_frame_equal(selected, by_hand)
+
+
+def test_reports_missing_coordinates(anno):
+    selected, report = select(anno, min_lat=-90, max_lat=90, min_lon=-180, max_lon=180,
+                              include_references=True, deduplicate=False, verbose=False)
+    assert len(selected) == 23089 - 784
+    assert report.loc[0, "note"] == "784 had no coordinates"
+
+
+def test_group_excludes_and_counts_outliers(anno):
+    selected, report = select(anno, groups="Scotland_Viking", verbose=False)
+    ids = set(selected["genetic_id"])
+    assert "VK202.AG" in ids and "VK201.AG" not in ids
+    assert report.loc[1, "note"].endswith("outliers excluded")
+
+
+def test_arguments_must_be_named(anno):
+    with pytest.raises(TypeError):
+        select(anno, 3000, 5000)
+    with pytest.raises(TypeError):
+        select(anno, min_snp=5000)          # misspelled: min_snp, not min_snps
+```
+
+### What each test checks
+
+- **Defaults:** with no options at all, reference genomes are gone, every person appears exactly once (`is_unique`), only the two default steps ran, and the first step removed exactly the **4** `.REF` rows you found. `report.loc[0, "removed"]` reads row 0 of the report, column `"removed"`.
+- **Only requested steps run:** asking only for coverage adds exactly one step, in the right position, between the two defaults.
+- **Matches the filters applied by hand:** the most important test here. It runs the same query two ways, through `select` and by calling each filter manually in the documented order, and checks the results are **identical**. If `select` skipped a step, ran them in a different order, or passed the wrong argument, this would catch it. `select` returns two values, but this test only needs the first, so the second is assigned to `_`, a conventional name for "I'm ignoring this."
+- **Missing coordinates:** with references included and deduplication off, a whole-world box must give exactly **23,089 − 784** rows, and the report must say **784**. Both numbers come from your profiling. References are included here so the 784 count isn't affected by the reference rows, which also lack coordinates.
+- **Outliers:** the VK202/VK201 pair once more, now through `select`. The report's population step (row 1, after the reference step) must state how many outliers were excluded.
+- **Named arguments:** positional numbers and a misspelled option are both rejected with a `TypeError`, Python's error for calling a function the wrong way.
+
+### Check, run, and commit
+
+```bash
+pytest --collect-only -q | tail -n 3
+```
+
+You should see **56 tests collected**: the previous 50 plus 6 new ones.
+
+```bash
+pytest -v
+```
+
+Then try it yourself, to see the report a user would see:
+
+```bash
+python -c "import aadrkit; a = aadrkit.load_anno('data/raw/v66.p1_1240K.aadr.PUB.anno'); s, r = aadrkit.select(a, min_bp=1000, max_bp=1500, countries='United Kingdom', min_snps=100000)"
+```
+
+You should see a small table listing each step, how many rows it removed, and the final count. That's `aadrkit` doing a complete, realistic query in one call.
+
+```bash
+git add src/aadrkit/query.py src/aadrkit/__init__.py tests/test_query.py
+```
+
+```bash
+git commit -m "Add select() to run filters in fixed order with defaults and a report"
+```
+
+Paste the `pytest -v` summary and the report table from the example query.
+- **Verificaiton:** I read through all of the design decisions and workflow that Claude suggested and made sure it aligned with the design I had in mind and did not add anything unnecessary. I then created the scripts and added code. I ran the pytest and the example run and all returned results as expected: 
+```
+02:39:58 (aadr-project) nelin@Nicole-ASUS project-hds ±|main ✗|→ python -c "import aadrkit; a = aadrkit.load_anno('data/raw/v66.p1_1240K.aadr.PUB.anno'); s, r = aadrkit.select(a, min_bp=1000, max_bp=1500, countries='United Kingdom', min_snps=100000)"
+                                     Step  Rows_before  Rows_after  Removed Note
+                Exclude Reference Genomes        23089       23085        4
+Date range (min_bp = 1000, max_bp = 1500)        23085        3301    19784
+                   Country United Kingdom         3301         259     3042
+                     At least 100000 SNPs          259         220       39
+                       One row per person          220         208       12
+Selected 208 rows.
+02:42:29 (aadr-project) nelin@Nicole-ASUS project-hds ±|main ✗|→
+```
