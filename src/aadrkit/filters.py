@@ -138,3 +138,30 @@ def filter_group(anno, groups, include_outliers=False, regex=False):
     if not include_outliers: # Removes every outlier unless include_outliers=True
         keep &= ~is_outlier(anno["group_id"])
     return anno[keep]
+
+def filter_min_snps(anno, min_snps): # no = after min_snps so it is required and without a number will raise an error, negative cannot mean anything either
+    """Keep individuals with at least `min_snps` SNPs covered on the 1240K panel.
+    
+    There is deliberately no default. The right threshold depends on the analysis,
+    so the user must choose it. The bound is inclusive. Individuals with a missing SNP
+    count are excluded."""
+    if min_snps < 0:
+        raise ValueError(f"min_snps must be 0 or greater, got {min_snps}")
+    return anno[anno["snps_1240k"] >= min_snps]
+
+def deduplicate_individuals(anno): 
+    """Keep one row per person (individual_id): the row with the most 1240K SNPs.
+    
+    Ties are broken by Genetic ID in alphabetical order, so the result is 
+    always the same. Rows with a missing individual_id are all kept, since 
+    there is no way to tell whether they are the same person. Apply this after
+    the other filters, so the best row is chosen among the rows that passed them.
+    Rows are returned in their original order."""
+    has_id = anno["individual_id"].notna()
+    ranked = anno[has_id].sort_values(
+        ["individual_id", "snps_1240k", "genetic_id"],
+        ascending=[True, False, True],
+    )
+    best = ranked.drop_duplicates("individual_id", keep="first")
+    return pd.concat([best, anno[~has_id]]).sort_index()
+    

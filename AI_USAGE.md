@@ -2570,4 +2570,210 @@ git commit -m "Add population filter; document case-only Group ID difference in 
 ```
 
 Paste the `pytest -v` summary. 
-- **Verificaiton:** I inspected the error myself, wrote the fix, reran the code, and made notes of the change. The code subsequently passed after the fixes. 
+- **Verificaiton:** I inspected the error myself, wrote the fix, reran the code, and made notes of the change. The code subsequently passed after the fixes.
+
+## Entry 12: 
+- **Tool:** Claude (Opus 5.5)
+- **What I was doing:** Creating deduplication and coverage filters.        
+- **What I asked (verbatim):** Can you write me code chunks that will achieve the following criteria for coverage and deduplication filtering: 
+Coverage and deduplication filter: The coverage filter keeps individuals with at least a given number of SNPs covered but the threshold has no default value. The min number depends on the analysis. Python will refuse to run until a number is given. The deduplication filter keeps one row per person, choosing which has the most SNPs. From previously, 23,089 rows belong to 21,433 people. Follow these rules: 1. pick the row with the most SNPs, 2. Break ties consistently if rows have exactly the same SNP count, the function must pick the same one every time (RULE = ALPHABETICAL), 3. Do not merge rows with a missing individual ID because there is no way to know whether they are the same person if two rows both lack an ID. Deduplication happens after filtering so best row is chosen among rows that passed.  
+- **Exact output (verbatim):**
+### Coverage filter and deduplication
+
+### The coverage filter
+
+**`filter_min_snps`** keeps individuals with at least a given number of SNPs covered (column 26, `snps_1240k`).
+
+There's one important design decision: **the threshold has no default value**. The right minimum depends entirely on the analysis. Some methods work with 20,000 SNPs, others need hundreds of thousands. If the function quietly assumed a number, users might not realize data was being dropped. Leaving the threshold without a default means Python itself refuses to run the function until a number is given.
+
+### Deduplication
+
+**`deduplicate_individuals`** keeps one row per person, choosing the row with the most SNPs. 23,089 rows belong to 21,433 people, and `YCH017` alone has 11 rows. It needs three rules:
+
+1. **Pick the row with the most SNPs.** That's the most informative dataset for that person, and it's how `YCH017.AG` should win.
+2. **Break ties consistently.** If two rows have exactly the same SNP count, the function must pick the same one every time, or rerunning the same query could produce different files, which would break reproducibility. The rule: the alphabetically first Genetic ID wins.
+3. **Never merge rows with a missing Individual ID.** If two rows both lack an ID, there's no way to know whether they're the same person, so both are kept. v66.p1 has no missing IDs, but the function shouldn't silently merge strangers if a future version does.
+
+**When to deduplicate:** in your earlier design, you decided **filter first, then deduplicate**, so the best row is chosen among rows that passed the user's filters. For the coverage filter specifically, the order happens not to matter: keeping each person's best row and then applying a threshold gives the same result as applying the threshold first. But it does matter for other filters. For example, if one person's rows had different data types, deduplicating first could keep a row that a later filter removes, losing that person entirely. The top-level function can enforce the correct order, so users don't have to remember it.
+
+### Add both functions to `filters.py`
+
+Add these to the bottom of `src/aadrkit/filters.py`:
+
+```python
+def filter_min_snps(anno, min_snps):
+    """Keep individuals with at least `min_snps` SNPs covered on the 1240K panel.
+
+    There is deliberately no default: the right threshold depends on the
+    analysis, so the user must choose it. The bound is inclusive.
+    Individuals with a missing SNP count are excluded.
+    """
+    if min_snps < 0:
+        raise ValueError(f"min_snps must be 0 or greater, got {min_snps}")
+    return anno[anno["snps_1240k"] >= min_snps]
+
+
+def deduplicate_individuals(anno):
+    """Keep one row per person (individual_id): the row with the most 1240K SNPs.
+
+    Ties are broken by Genetic ID in alphabetical order, so the result is
+    always the same. Rows with a missing individual_id are all kept, since
+    there is no way to tell whether they are the same person. Apply this
+    after the other filters, so the best row is chosen among the rows that
+    passed them. Rows are returned in their original order.
+    """
+    has_id = anno["individual_id"].notna()
+    ranked = anno[has_id].sort_values(
+        ["individual_id", "snps_1240k", "genetic_id"],
+        ascending=[True, False, True],
+    )
+    best = ranked.drop_duplicates("individual_id", keep="first")
+    return pd.concat([best, anno[~has_id]]).sort_index()
+```
+
+### How `filter_min_snps` works
+
+- **`def filter_min_snps(anno, min_snps):`** has no `=` after `min_snps`, so it's **required**. Calling `filter_min_snps(anno)` without a number raises an error immediately.
+- **A negative minimum** can't mean anything sensible, so it raises a `ValueError` instead of quietly returning everyone.
+- **`>=`** makes the threshold inclusive, the same convention as the date filter.
+
+### How `deduplicate_individuals` works
+
+It works by **sorting so the winning row for each person comes first**, then keeping only the first row per person:
+
+- **`has_id`** marks rows that have an Individual ID. Only those take part in deduplication.
+- **`sort_values([...], ascending=[True, False, True])`** sorts by three columns, in priority order:
+  1. **`individual_id`**, ascending: groups each person's rows together.
+  2. **`snps_1240k`**, **descending** (`False`): within each person, the most SNPs first.
+  3. **`genetic_id`**, ascending: if two rows tie on SNPs, the alphabetically first ID comes first.
+- **`drop_duplicates("individual_id", keep="first")`** keeps the first row for each person, which thanks to the sort is their best row.
+- **`pd.concat([best, anno[~has_id]])`** stacks the deduplicated rows and the rows without an ID back into one table.
+- **`.sort_index()`** puts the rows back in their original file order. Each row has kept its original row label (its "index") through all of these steps, so sorting by that label restores the order from the file. A stable, predictable order also makes the output reproducible.
+
+### Write the tests
+
+Add `deduplicate_individuals` and `filter_min_snps` to the import list at the top of `tests/test_filters.py`, keeping it alphabetical:
+
+```python
+from aadrkit.filters import (
+    base_group,
+    deduplicate_individuals,
+    exclude_present_day,
+    exclude_reference_genomes,
+    filter_bounding_box,
+    filter_country,
+    filter_date_range,
+    filter_group,
+    filter_min_snps,
+    is_outlier,
+)
+```
+
+Then add a fourth toy fixture and these tests at the bottom:
+
+```python
+@pytest.fixture
+def reps():
+    """Repeated individuals, a tie, and rows without an Individual ID."""
+    return pd.DataFrame({
+        "genetic_id": ["P1.AG", "P1.SG", "P2.AG", "P3.AG", "P3.TW", "X.AG", "Y.AG"],
+        "individual_id": ["P1", "P1", "P2", "P3", "P3", float("nan"), float("nan")],
+        "snps_1240k": [500, 900, 300, 700, 700, 100, 200],
+    })
+
+
+# --- Coverage and deduplication: toy-table tests ---
+
+def test_min_snps_is_inclusive(reps):
+    assert list(filter_min_snps(reps, 700)["genetic_id"]) == ["P1.SG", "P3.AG", "P3.TW"]
+
+
+def test_min_snps_rejects_negative(reps):
+    with pytest.raises(ValueError):
+        filter_min_snps(reps, -1)
+
+
+def test_dedupe_keeps_highest_coverage_row(reps):
+    ids = set(deduplicate_individuals(reps)["genetic_id"])
+    assert "P1.SG" in ids and "P1.AG" not in ids
+
+
+def test_dedupe_breaks_ties_by_genetic_id(reps):
+    ids = set(deduplicate_individuals(reps)["genetic_id"])
+    assert "P3.AG" in ids and "P3.TW" not in ids
+
+
+def test_dedupe_keeps_rows_without_individual_id(reps):
+    ids = set(deduplicate_individuals(reps)["genetic_id"])
+    assert {"X.AG", "Y.AG"} <= ids
+
+
+def test_dedupe_preserves_original_order(reps):
+    assert list(deduplicate_individuals(reps)["genetic_id"]) == [
+        "P1.SG", "P2.AG", "P3.AG", "X.AG", "Y.AG",
+    ]
+
+
+# --- Coverage and deduplication: real-data tests ---
+
+def test_min_snps_on_real_data(anno):
+    assert "I13976.SG" in set(filter_min_snps(anno, 281)["genetic_id"])       # exactly 281
+    assert "I13976.SG" not in set(filter_min_snps(anno, 282)["genetic_id"])
+
+
+def test_dedupe_on_real_data(anno):
+    result = deduplicate_individuals(anno)
+    assert len(result) == 21433
+    ych = result[result["individual_id"] == "YCH017"]
+    assert list(ych["genetic_id"]) == ["YCH017.AG"]
+```
+
+### What the tests check
+
+**The `reps` fixture** covers each deduplication rule:
+
+| Rows | Situation | Expected |
+|---|---|---|
+| P1.AG (500), P1.SG (900) | One person, two datasets | Keep **P1.SG** (more SNPs) |
+| P2.AG (300) | One person, one row | Keep it |
+| P3.AG (700), P3.TW (700) | A tie | Keep **P3.AG** (alphabetically first) |
+| X.AG, Y.AG | No Individual ID | Keep **both** |
+
+**The toy tests:**
+- **Inclusive threshold:** at exactly 700, both tied P3 rows pass, as does P1.SG (900).
+- **Negative threshold:** rejected.
+- **The three deduplication rules,** each with its own test, so a failure tells you exactly which rule broke.
+- **Original order:** the full expected list, which also confirms nothing extra was kept or lost.
+
+**The real-data tests use numbers you already verified independently:**
+- **I13976.SG has exactly 281 SNPs**, the lowest in the file, confirmed by hand with `grep`. A threshold of 281 keeps it and 282 drops it. That tests the inclusive boundary on a real record.
+- **21,433** is the number of distinct people you counted in Phase 2 with `profile_ids.py`. Deduplicating the whole file must produce exactly one row per person.
+- **YCH017:** of its 11 rows, only `YCH017.AG` (1,064,203 SNPs, also hand-verified) may remain. That's exactly what you chose it for in Phase 2.
+
+### Check, run, and commit
+
+First, confirm the new tests were collected. That's your new habit:
+
+```bash
+pytest --collect-only -q | tail -n 3
+```
+
+- **`| tail -n 3`** shows only the last three lines of the output, where pytest prints the total count.
+- You should see **50 tests collected**: the previous 42, plus 6 toy tests and 2 real-data tests.
+
+Then run them:
+
+```bash
+pytest -v
+```
+
+```bash
+git add src/aadrkit/filters.py tests/test_filters.py
+```
+
+```bash
+git commit -m "Add coverage filter and deduplication with tests"
+```
+
+Paste the `pytest -v` summary when it's done.
+- **Verificaiton:**

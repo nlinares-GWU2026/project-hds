@@ -4,12 +4,14 @@ import pytest
 from aadrkit.anno import list_values
 from aadrkit.filters import (
     base_group,
+    deduplicate_individuals,
     exclude_present_day,
     exclude_reference_genomes,
     filter_bounding_box,
     filter_country,
     filter_date_range,
     filter_group,
+    filter_min_snps,
     is_outlier,
 )
 
@@ -185,3 +187,51 @@ def test_group_on_real_data(anno):
     assert "VK202.AG" in default and "VK201.AG" not in default
     assert {"VK202.AG", "VK201.AG"} <= with_outliers
 
+
+
+@pytest.fixture
+def reps(): # Covers each deduplication rule 
+    """Repeated individuals, a tie, and rows without an Individual ID."""
+    return pd.DataFrame({
+        "genetic_id": ["P1.AG", "P1.SG", "P2.AG", "P3.AG", "P3.TW", "X.AG", "Y.AG"],
+        "individual_id": ["P1", "P1", "P2", "P3", "P3", float("nan"), float("nan")],
+        "snps_1240k": [500, 900, 300, 700, 700, 100, 200],
+    })
+
+# Coverage and deduplication toy-table tests
+
+def test_min_snps_is_inclusive(reps):
+    assert list(filter_min_snps(reps, 700)["genetic_id"]) == ["P1.SG", "P3.AG", "P3.TW"]
+
+def test_min_snps_rejects_negative(reps):
+    with pytest.raises(ValueError):
+        filter_min_snps(reps, -1)
+
+def test_dedupe_keeps_highest_coverage_row(reps):
+    ids = set(deduplicate_individuals(reps)["genetic_id"])
+    assert "P1.SG" in ids and "P1.AG" not in ids
+
+def test_dedupe_breaks_ties_by_genetic_id(reps):
+    ids = set(deduplicate_individuals(reps)["genetic_id"])
+    assert "P3.AG" in ids and "P3.TW" not in ids
+
+def test_dedupe_keeps_rows_without_individual_id(reps):
+    ids = set(deduplicate_individuals(reps)["genetic_id"])
+    assert {"X.AG", "Y.AG"} <= ids
+
+def test_dedupe_preserves_original_order(reps):
+    assert list(deduplicate_individuals(reps)["genetic_id"]) == [
+        "P1.SG", "P2.AG", "P3.AG", "X.AG", "Y.AG",
+    ]
+
+# Coverage and deduplication: real-data tests
+
+def test_min_snps_on_real_data(anno):
+    assert "I13976.SG" in set(filter_min_snps(anno, 281)["genetic_id"])       # exactly 281
+    assert "I13976.SG" not in set(filter_min_snps(anno, 282)["genetic_id"])
+
+def test_dedupe_on_real_data(anno):
+    result = deduplicate_individuals(anno)
+    assert len(result) == 21433
+    ych = result[result["individual_id"] == "YCH017"]
+    assert list(ych["genetic_id"]) == ["YCH017.AG"]
