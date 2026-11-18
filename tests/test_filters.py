@@ -3,11 +3,14 @@ import pytest
 
 from aadrkit.anno import list_values
 from aadrkit.filters import (
+    base_group,
     exclude_present_day,
     exclude_reference_genomes,
     filter_bounding_box,
     filter_country,
     filter_date_range,
+    filter_group,
+    is_outlier,
 )
 
 @pytest.fixture
@@ -55,7 +58,7 @@ def test_exclude_present_day_on_real_data(anno):
     assert not {"NA20813.DG", "JHF05.AG", "Chimp.REF"} & ids # asserts that present day controls and ref genomes are excluded 
 
 @pytest.fixture
-def places():
+def places(): # A and B: Spain vs Canary Islands, C: Secondary country for testing lists, D and E: Tonga and Vanuatu on opposite sides of 180 line, F: missing everything, G: country but no coordinates
     """A tiny hand-made table covering the region edge cases."""
     return pd.DataFrame({
         "genetic_id": ["A", "B", "C", "D", "E", "F", "G"],
@@ -115,3 +118,70 @@ def test_whole_world_box_excludes_missing_coordinates(anno):
     world = filter_bounding_box(anno, min_lat=-90, max_lat=90, min_lon=-180, max_lon=180)
     assert len(world) == 23089 - 784
     assert not {"I8508.AG", "Khwit.SG", "Chimp.REF"} & set(world["genetic_id"])
+
+
+
+@pytest.fixture
+def pops(): # A = plain group, B = same group w bare outlier suffix, C = different viking gorup for pattern matching, D = tests anchoring with $,
+    # E = outlier with a description after the suffix, F = E's base group, G = another described outlier
+    """A tiny hand-made table covering the population edge cases."""
+    return pd.DataFrame({
+        "genetic_id": ["A", "B", "C", "D", "E", "F", "G"],
+        "group_id": ["Scotland_Viking", "Scotland_Viking-o", "Sweden_Viking",
+                     "Poland_IA", "England_BellBeaker-ohighEEF",
+                     "England_BellBeaker", "Russia_Karasuk-oAegean"],
+    })
+
+# Population: toy table tests
+
+def test_base_group_strips_outlier_suffix(pops): # checked row by row including the suffixes
+    assert list(base_group(pops["group_id"])) == [
+        "Scotland_Viking", "Scotland_Viking", "Sweden_Viking", "Poland_IA",
+        "England_BellBeaker", "England_BellBeaker", "Russia_Karasuk",
+    ]
+
+def test_is_outlier(pops):  # checked row by row including the suffixes
+    assert list(is_outlier(pops["group_id"])) == [False, True, False, False, True, False, True]
+
+def test_group_exact_excludes_outliers(pops): # excludes outliers by default (only A) and includes them on request (A and B)
+    # "Viking" matches no group exactly on its own, so the result is empty and a warning names what failed
+    assert list(filter_group(pops, "Scotland_Viking")["genetic_id"]) == ["A"]
+
+def test_group_exact_can_include_outliers(pops): # excludes outliers by default (only A) and includes them on request (A and B)
+    # finds both Scottish and Swedish Vikings, adds outlier only when asked
+    result = filter_group(pops, "Scotland_Viking", include_outliers=True)
+    assert list(result["genetic_id"]) == ["A", "B"]
+
+def test_group_exact_ignores_capitalization(pops): # finds both Scottish and Swedish Vikings, adds outlier only when asked
+    assert list(filter_group(pops, "scotland_VIKING")["genetic_id"]) == ["A"]
+
+def test_group_exact_does_not_match_partial_names(pops):
+    with pytest.warns(UserWarning, match="viking"):
+        result = filter_group(pops, "Viking")
+    assert result.empty
+
+def test_group_regex_contains(pops): # finds both Scottish and Swedish Vikings, adds outlier only when asked
+    assert list(filter_group(pops, "Viking", regex=True)["genetic_id"]) == ["A", "C"]
+    result = filter_group(pops, "Viking", regex=True, include_outliers=True)
+    assert list(result["genetic_id"]) == ["A", "B", "C"]
+
+def test_group_regex_keeps_outlier_descriptions_with_their_group(pops):
+    result = filter_group(pops, "BellBeaker", regex=True, include_outliers=True)
+    assert list(result["genetic_id"]) == ["E", "F"]
+
+def test_group_regex_anchored_end(pops): # Finds names only ending in _IA
+    assert list(filter_group(pops, "_IA$", regex=True)["genetic_id"]) == ["D"]
+
+def test_group_regex_warns_when_nothing_matches(pops):
+    with pytest.warns(UserWarning, match="Neanderthal"):
+        result = filter_group(pops, "Neanderthal", regex=True)
+    assert result.empty
+
+# Population: real data test
+
+def test_group_on_real_data(anno):
+    default = set(filter_group(anno, "Scotland_Viking")["genetic_id"])
+    with_outliers = set(filter_group(anno, "Scotland_Viking", include_outliers=True)["genetic_id"])
+    assert "VK202.AG" in default and "VK201.AG" not in default
+    assert {"VK202.AG", "VK201.AG"} <= with_outliers
+

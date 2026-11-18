@@ -1923,7 +1923,7 @@ git commit -m "Add date range, present-day, and reference genome filters with te
 ```
 
 Paste the `pytest -v` summary and the two numbers.
-- **Verificaiton:** I typed up the script and logically walked through it. I ran pytest and all 19 tests (including the others I built previously) passed successfully. I also ran the command to see how many distinct people reamined after removing present day individuals and the numbers 19,119 and 17,634 returned showing that my present day filter agrees with AADR's own published counts on both measures (rows and number of distinct people).
+- **Verificaiton:** I typed up the script and logically walked through it. I ran pytest and all 19 tests (including the others I built previously) passed successfully. I also ran the command to see how many distinct people reamined after removing present day individuals and the numbers 19,119 and 17,630 returned showing that my present day filter agrees with AADR's own published counts on both measures (rows and number of distinct people). *See notes for probable merged v66.p1 and resulting 4 individuals less*.
 
 ## Entry 10: 
 - **Tool:** Claude (Opus 5.5)
@@ -2185,4 +2185,389 @@ git commit -m "Add country and bounding-box filters, list_values helper, and tes
 ```
 
 Paste the `pytest -v` summary.
-- **Verificaiton:**
+- **Verificaiton:** I typed up the script and logically walked through it. I ran pytest and all 28 tests (including the others I built previously) passed successfully. 
+
+## Entry 11: 
+- **Tool:** Claude (Opus 5.5)
+- **What I was doing:** Creating a script for population filters.
+- **What I asked (verbatim):** "Can you help me in the same way as before to create scripts and test for population filters? Follow these ideas: Population filters: Will probably be used the most since AADR's Group IDs encode place, period, and culture all at once. Design Decisions: Exact matching by default plus browsing because 3,897 groups with exact names are hard to guess, an optional regex mode because researchers might want "every Iron Age group" or "every Viking group", matching on the base group name (suffix removed) with excluding outliers unless true because 499 groups end in an outlier suffix, and one explicity option that works the same way in both matching modes because outlier inclusion is the researchers decision.*Match on the base name, decide outliers seperate*. On a different final step, the outliers are removed unless the user asks for the. 
+- **Exact output (verbatim):**
+### The population filter
+
+| Finding | Design decision |
+|---|---|
+| 3,897 groups, with exact names hard to guess | Exact matching by default, plus `list_values(anno, "group_id")` to browse |
+| Researchers often want "every Iron Age group" or "every Viking group" | An optional **regular-expression** mode (Week 4 material) |
+| 499 groups end in an outlier suffix: `-o`, `-ohighEEF`, `-oEastAsia` | Match on the **base group name** (suffix removed); exclude outliers unless `include_outliers=True` |
+| Outlier inclusion is the researcher's scientific decision | One explicit option that works the same way in both matching modes |
+
+### The key idea: match on the base name, decide outliers separately
+
+Every Group ID is split into two pieces of information:
+
+- **The base group:** `England_BellBeaker-ohighEEF` becomes `England_BellBeaker`.
+- **Whether it's an outlier:** yes, because it has the `-o...` suffix.
+
+Matching happens **only on the base group**. Then, as a separate final step, outliers are removed unless the user asked for them. That gives one simple rule for users: *"name the population you want; decide separately whether to include its outliers."* It works the same whether they typed an exact name or a pattern.
+
+Without this split, the two modes would treat outliers inconsistently. A pattern like `Viking` would silently include `Scotland_Viking-o`, while the exact name `Scotland_Viking` would silently exclude it.
+
+### Add the population filter to `filters.py`
+
+Add this to the bottom of `src/aadrkit/filters.py`:
+
+```python
+# Outlier groups end in "-o", optionally followed by a description with no
+# underscore, e.g. "Scotland_Viking-o" or "England_BellBeaker-ohighEEF".
+OUTLIER_SUFFIX = r"-o[^_]*$"
+
+
+def is_outlier(group_ids):
+    """True for each Group ID marked as a population-genetic outlier ("-o" suffix)."""
+    return group_ids.str.contains(OUTLIER_SUFFIX, regex=True, na=False)
+
+
+def base_group(group_ids):
+    """Remove any outlier suffix: "England_BellBeaker-ohighEEF" -> "England_BellBeaker"."""
+    return group_ids.str.replace(OUTLIER_SUFFIX, "", regex=True)
+
+
+def filter_group(anno, groups, include_outliers=False, regex=False):
+    """Keep individuals whose population label (AADR "Group ID") matches `groups`.
+
+    Matching uses the base group name, with any outlier suffix ("-o",
+    "-ohighEEF", ...) removed, and ignores capitalization. Outliers are
+    excluded unless include_outliers=True.
+
+    regex=False: `groups` are exact base names, e.g. "Scotland_Viking".
+    regex=True: `groups` are regular-expression patterns searched within
+    the base name, e.g. "_IA$" (ends with "_IA") or "Viking" (contains "Viking").
+    `groups` can be one name/pattern or a list.
+    """
+    if isinstance(groups, str):
+        groups = [groups]
+    base = base_group(anno["group_id"]).str.casefold()
+
+    if regex:
+        keep = pd.Series(False, index=anno.index)
+        for pattern in groups:
+            hits = base.str.contains(pattern, case=False, regex=True, na=False)
+            if not hits.any():
+                warnings.warn(f"Pattern {pattern!r} matched no groups", UserWarning, stacklevel=2)
+            keep |= hits
+    else:
+        wanted = {g.strip().casefold() for g in groups}
+        for name in sorted(wanted - set(base.dropna())):
+            warnings.warn(
+                f"No group {name!r}. Give the name without any outlier suffix "
+                f"(use include_outliers=True for outliers), and check spelling "
+                f"with list_values(anno, 'group_id')",
+                UserWarning,
+                stacklevel=2,
+            )
+        keep = base.isin(wanted)
+
+    if not include_outliers:
+        keep &= ~is_outlier(anno["group_id"])
+    return anno[keep]
+```
+
+### How it works
+
+**`OUTLIER_SUFFIX`** stored once at the top so every function uses the same definition:
+- **`-o`** is the literal suffix marker.
+- **`[^_]*`** allows any following characters except an underscore (`highEEF`, `EastAsia`, or nothing at all).
+- **`$`** anchors it at the end of the name.
+
+The comment above it shows real examples, so a future reader doesn't have to decode the regular expression to know what it's for.
+
+**`is_outlier`** returns True/False for each Group ID:
+- **`.str.contains(..., regex=True)`** checks whether the pattern appears.
+- **`na=False`** says "treat a missing Group ID as *not* an outlier," rather than producing a missing value that would break the True/False logic later.
+
+**`base_group`** uses **`.str.replace(OUTLIER_SUFFIX, "", regex=True)`** to replace the suffix with nothing, removing it. Names without a suffix are unchanged.
+
+**`filter_group`**, step by step:
+- **The single-name handling** (`isinstance` check) is the same as in `filter_country`.
+- **`base`** holds every row's base group in lowercase. Both modes compare against this.
+- **Regular-expression mode:**
+  - It starts with `keep` as all **`False`** (nothing selected), because each pattern *adds* matches. That's the opposite of the date and region filters, which start with everything and narrow it down.
+  - For each pattern, **`base.str.contains(pattern, case=False, ...)`** finds the base names containing it.
+  - If a pattern matches nothing, a warning is issued, for the same reason as with countries: it may be a typo, or this subset may just not contain that group.
+  - **`keep |= hits`** is short for `keep = keep | hits`: a row is selected if it was already selected **or** matches this pattern. So a list of patterns works as "any of these."
+- **Exact mode** is the same logic as `filter_country`. The warning also reminds users to give the name *without* a suffix, since typing `Scotland_Viking-o` would otherwise find nothing with no explanation.
+- **The final outlier step** removes every outlier unless `include_outliers=True`. It runs after either mode, so the behavior is identical in both.
+
+### Write the tests
+
+Update the import in `tests/test_filters.py` to include the new functions:
+
+```python
+from aadrkit.filters import (
+    base_group,
+    exclude_present_day,
+    exclude_reference_genomes,
+    filter_bounding_box,
+    filter_country,
+    filter_date_range,
+    filter_group,
+    is_outlier,
+)
+```
+
+Then add a third toy fixture and these tests at the bottom:
+
+```python
+@pytest.fixture
+def pops():
+    """A tiny hand-made table covering the population edge cases."""
+    return pd.DataFrame({
+        "genetic_id": ["A", "B", "C", "D", "E", "F", "G"],
+        "group_id": ["Scotland_Viking", "Scotland_Viking-o", "Sweden_Viking",
+                     "Poland_IA", "England_BellBeaker-ohighEEF",
+                     "England_BellBeaker", "Russia_Karasuk-oAegean"],
+    })
+
+
+# --- Population: toy-table tests ---
+
+def test_base_group_strips_outlier_suffix(pops):
+    assert list(base_group(pops["group_id"])) == [
+        "Scotland_Viking", "Scotland_Viking", "Sweden_Viking", "Poland_IA",
+        "England_BellBeaker", "England_BellBeaker", "Russia_Karasuk",
+    ]
+
+
+def test_is_outlier(pops):
+    assert list(is_outlier(pops["group_id"])) == [False, True, False, False, True, False, True]
+
+
+def test_group_exact_excludes_outliers_by_default(pops):
+    assert list(filter_group(pops, "Scotland_Viking")["genetic_id"]) == ["A"]
+
+
+def test_group_exact_can_include_outliers(pops):
+    result = filter_group(pops, "Scotland_Viking", include_outliers=True)
+    assert list(result["genetic_id"]) == ["A", "B"]
+
+
+def test_group_exact_ignores_capitalization(pops):
+    assert list(filter_group(pops, "scotland_VIKING")["genetic_id"]) == ["A"]
+
+
+def test_group_exact_does_not_match_partial_names(pops):
+    with pytest.warns(UserWarning, match="viking"):
+        result = filter_group(pops, "Viking")
+    assert result.empty
+
+
+def test_group_regex_contains(pops):
+    assert list(filter_group(pops, "Viking", regex=True)["genetic_id"]) == ["A", "C"]
+    result = filter_group(pops, "Viking", regex=True, include_outliers=True)
+    assert list(result["genetic_id"]) == ["A", "B", "C"]
+
+
+def test_group_regex_anchored_end(pops):
+    assert list(filter_group(pops, "_IA$", regex=True)["genetic_id"]) == ["D"]
+
+
+def test_group_regex_keeps_outlier_descriptions_with_their_group(pops):
+    result = filter_group(pops, "BellBeaker", regex=True, include_outliers=True)
+    assert list(result["genetic_id"]) == ["E", "F"]
+
+
+def test_group_regex_warns_when_nothing_matches(pops):
+    with pytest.warns(UserWarning, match="Neanderthal"):
+        result = filter_group(pops, "Neanderthal", regex=True)
+    assert result.empty
+
+
+# --- Population: real-data test ---
+
+def test_group_on_real_data(anno):
+    default = set(filter_group(anno, "Scotland_Viking")["genetic_id"])
+    with_outliers = set(filter_group(anno, "Scotland_Viking", include_outliers=True)["genetic_id"])
+    assert "VK202.AG" in default and "VK201.AG" not in default
+    assert {"VK202.AG", "VK201.AG"} <= with_outliers
+```
+
+### What the tests check
+
+**The `pops` fixture** covers each kind of group name:
+
+| Row | Group ID | Why it's there |
+|---|---|---|
+| A | `Scotland_Viking` | Plain group |
+| B | `Scotland_Viking-o` | Same group, bare outlier suffix (like VK201) |
+| C | `Sweden_Viking` | A different Viking group, for pattern matching |
+| D | `Poland_IA` | Tests anchoring with `$` |
+| E | `England_BellBeaker-ohighEEF` | Outlier with a description after the suffix |
+| F | `England_BellBeaker` | E's base group |
+| G | `Russia_Karasuk-oAegean` | Another described outlier, like RISE492 |
+
+**What each test confirms:**
+- **`base_group` and `is_outlier`** are checked row by row, including the described suffixes (`-ohighEEF`, `-oAegean`).
+- **Exact mode excludes outliers by default** (only A), and **includes them on request** (A and B).
+- **Capitalization doesn't matter** (`scotland_VIKING` works).
+- **Exact mode never does partial matching:** `"Viking"` alone matches no group exactly, so the result is empty and a warning names what failed. This keeps exact mode trustworthy: it never quietly matches more than the user typed.
+- **Regex "contains":** `Viking` finds both Scottish and Swedish Vikings, and adds the outlier only when asked.
+- **Regex anchoring:** `_IA$` finds only names *ending* in `_IA`. This is the anchoring idea from before, now part of the tool.
+- **Described outliers belong to their base group:** `BellBeaker` with outliers included returns both E and F.
+- **A pattern that matches nothing** produces a warning.
+
+**The real-data test** is your VK201/VK202 pair, chosen earlier specifically for this filter: VK202 is in the default result, and VK201 appears only with `include_outliers=True`.
+
+### Add two data assumption tests
+
+The filter relies on two facts about v66.p1 that are worth guarding. Add these to `tests/test_data_assumptions.py`, with `import pandas as pd` and `from aadrkit.filters import is_outlier` at the top:
+
+```python
+def test_outlier_rule_matches_simple_search(anno):
+    """The precise "-o" rule finds the same 499 groups as a plain text search."""
+    groups = pd.Series(anno["group_id"].unique())
+    precise = is_outlier(groups).sum()
+    simple = groups.str.contains("-o", regex=False).sum()
+    assert precise == simple == 499
+
+
+def test_group_ids_are_distinct_ignoring_capitalization(anno):
+    """Case-insensitive matching never merges two different groups."""
+    groups = anno["group_id"].dropna().unique()
+    assert len({g.casefold() for g in groups}) == len(groups)
+```
+
+**The first test**: the precise regular expression and the naive "contains `-o`" search must agree, at 499 groups. If a future AADR release had a group with `-o` somewhere other than the end, the counts would differ, and this test would flag it before it caused a wrong result.
+
+**The second test** protects the decision to ignore capitalization. If two genuinely different groups were spelled the same except for capitals, lowercasing everything would merge them into one. This test counts the groups before and after lowercasing; equal counts mean no two groups collide.
+
+### Run and commit
+
+```bash
+pytest -v
+```
+
+You should see **41 passed**: the previous 28, plus 10 toy tests, 1 real-data test, and 2 data assumption tests.
+
+```bash
+git add src/aadrkit/filters.py tests/test_filters.py tests/test_data_assumptions.py
+```
+
+```bash
+git commit -m "Add population filter with exact/regex matching and outlier handling"
+```
+
+Paste the `pytest -v` summary.
+- **What I asked next (verbatim):** I ran into the same error repeatedly after manually checking my code but deduced that there was probably a mismatch in the Group IDs when converting them to lowercase. I pasted the error and asked Claude to help me write code to find the error and determine if it is duplicate populations or different:
+```bash
+________________________________________ test_group_ids_are_distinct_ignoring_capitalization ________________________________________
+
+anno =          genetic_id individual_id                 first_publication  ...       y_haplogroup mt_haplogroup        asses...95             AkbariReichNature2026  ...          I2a1b1a2b           NaN  PROVISIONAL_PASS
+
+[23089 rows x 16 columns]
+
+    def test_group_ids_are_distinct_ignoring_capitalization(anno):
+        """Case-insensitive matching never merges two different groups."""
+        groups = anno["group_id"].dropna().unique()
+>       assert len({g.casefold() for g in groups}) == len(groups)
+E       AssertionError: assert 3896 == 3897
+E        +  where 3896 = len({'abkhasian', 'acb', 'acb-1', 'acb-2', 'acb-3', 'adygei', ...})
+E        +  and   3897 = len(array(['Luxembourg_Loschbour_Mesolithic',\n       'Greece_EpanoKoufonisi_EBA_Cycladic', 'Greece_ElatiLogkassite_MBA',\n       ..., 'China_Penghu_Suogang_LN', 'Afghanistan_DarraiKurCave_MBA',\n       'Romania_Brailita_Mesolithic'], shape=(3897,), dtype=object))
+
+tests/test_data_assumptions.py:33: AssertionError
+====================================================== short test summary info ======================================================
+FAILED tests/test_data_assumptions.py::test_group_ids_are_distinct_ignoring_capitalization - AssertionError: assert 3896 == 3897
+=================================================== 1 failed, 39 passed in 41.02s ===================================================
+02:53:00 (aadr-project) nelin@Nicole-ASUS project-hds ±|main ✗|→
+```
+- **Exact output (verbatim):**
+Both mysteries are solved, and the first turned out to be a nice finding.
+
+### The collision is a typo in AADR, and it doesn't affect your filter
+
+The two labels are:
+
+- `Hungary_EarlyAvar-oLowEastAsia` (52 individuals)
+- `Hungary_EarlyAvar-olowEastAsia` (1 individual, `A1824.AG`)
+
+Everything about the rows says they're the **same group, written inconsistently**:
+
+- **Same country** (Hungary) and **same time period** (around 1,300 BP).
+- **Same paper:** `A1824.AG` comes from `Gnecchi-RusconeKrauseCell2022`, and so does `A1817.AG` right above it, which uses the capital-L spelling.
+- **Same meaning:** both are outliers from the Early Avar group, with lower East Asian–related ancestry than is typical for that group. The capitalization of "low" is the only difference.
+
+So this is a small inconsistency in AADR's labels, not two genuinely different populations.
+
+**It also turns out not to matter for your filter at all.** The difference sits entirely *inside the outlier suffix*, and `filter_group` matches on the **base** group name, with the suffix removed. Both labels become `Hungary_EarlyAvar`, and both are outliers. So with or without `include_outliers`, a user gets identical results either way.
+
+That means your code is right. But the test was checking a slightly broader assumption than the code actually relies on. The filter only cares whether **base names** collide, not whether full labels do.
+
+### Fixing the test
+
+Replace `test_group_ids_are_distinct_ignoring_capitalization` in `tests/test_data_assumptions.py` with these two tests, and add `base_group` to the import from `aadrkit.filters` at the top:
+
+```python
+def test_known_capitalization_differences_in_group_ids(anno):
+    """v66.p1 has exactly one pair of Group IDs differing only by capitalization.
+
+    Both are outliers of Hungary_EarlyAvar from the same study; the outlier
+    description is written "Low" in one and "low" in the other.
+    """
+    labels = anno["group_id"].dropna().drop_duplicates()
+    collide = sorted(labels[labels.str.casefold().duplicated(keep=False)])
+    assert collide == ["Hungary_EarlyAvar-oLowEastAsia", "Hungary_EarlyAvar-olowEastAsia"]
+
+
+def test_base_groups_are_distinct_ignoring_capitalization(anno):
+    """Case-insensitive matching never merges two different base groups.
+
+    filter_group matches on base names (outlier suffix removed), so this is
+    the assumption that matters for filtering.
+    """
+    bases = base_group(anno["group_id"].dropna()).unique()
+    assert len({b.casefold() for b in bases}) == len(bases)
+```
+
+### Why two tests instead of one
+
+**The first test records exactly what you found.** It doesn't just say "collisions are fine now." It names the **one** known pair. If a future AADR release added a *new* collision, the list wouldn't match, and the test would fail again and make you look. Writing down the specific exception keeps the alarm working for everything else. That's very different from deleting the test or loosening it until it passes.
+
+- **`sorted(...)`** puts the two labels in a fixed order so the comparison is reliable. Capital letters sort before lowercase ones, which is why `-oLow...` comes first.
+
+**The second test checks the assumption the code actually depends on:** after stripping outlier suffixes, no two base names differ only by capitalization. It's the same counting trick as before, applied to `base_group(...)` instead of the raw labels.
+
+I expect this second test to pass, but run it rather than assume. If it fails, there's a case collision among the base names themselves, which would matter, and we'd look at it the same way.
+
+### The missing test
+
+Comparing the collected list, the one that's absent is:
+
+**`test_group_regex_keeps_outlier_descriptions_with_their_group`**, the Bell Beaker test. It probably just didn't get copied in. Add it to `tests/test_filters.py` with the other population tests:
+
+```python
+def test_group_regex_keeps_outlier_descriptions_with_their_group(pops):
+    result = filter_group(pops, "BellBeaker", regex=True, include_outliers=True)
+    assert list(result["genetic_id"]) == ["E", "F"]
+```
+
+It's worth having: it's the only toy test where an outlier has a **description** after `-o` (`-ohighEEF`) and still has to be recognized as belonging to its base group. That's exactly the situation in the Avar labels you just found.
+
+A useful habit from this: when you add tests, run `pytest --collect-only -q` and check that the count went up by as much as you expected. A test that was never collected can't fail, so nothing else would have told you it was missing.
+
+### Run and commit
+
+```bash
+pytest -v
+```
+
+You should now see **42 passed**: the 40 collected before, plus the missing Bell Beaker test, plus the second new data assumption test (the first one replaced the failing test).
+
+```bash
+git add src/aadrkit/filters.py tests/test_filters.py tests/test_data_assumptions.py scripts/find_case_collisions.py
+```
+
+```bash
+git commit -m "Add population filter; document case-only Group ID difference in v66.p1"
+```
+
+Paste the `pytest -v` summary. 
+- **Verificaiton:** I inspected the error myself, wrote the fix, reran the code, and made notes of the change. The code subsequently passed after the fixes. 
