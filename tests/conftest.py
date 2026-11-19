@@ -22,3 +22,16 @@ def ground_truth():
         GROUND_TRUTH_PATH, sep="\t", encoding="utf-8",
         keep_default_na=False, na_values=[".."],
     )
+
+
+
+@pytest.fixture(scope="session")
+def genotype_files():
+    """Paths to the AADR genotype files: (.geno, .snp, .ind)."""
+    paths = tuple(
+        ROOT / "data" / "raw" / f"v66.p1_1240K.aadr.patch.PUB.{ext}" # filenames are built with f-string rather than pathlib's `with_suffix`, because it would treat .PUB as the extension, replace it, and cause a bug
+        for ext in ("geno", "snp", "ind")
+    )
+    if not all(p.exists() for p in paths):
+        pytest.skip("AADR genotype files not found. See README 'Data' section.")
+    return paths

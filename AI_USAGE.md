@@ -3074,3 +3074,478 @@ Date range (min_bp = 1000, max_bp = 1500)        23085        3301    19784
 Selected 208 rows.
 02:42:29 (aadr-project) nelin@Nicole-ASUS project-hds ±|main ✗|→
 ```
+
+## Entry 14:
+- **Tool:** Claude (Opus 5.5)
+- **What I was doing:** Converting aadrkit from a tool that reads metadata into one that extracts the genotype data automatically. 
+- **What I asked (verbatim):** "Next I need a Convertf wrapper. I need the tool to automate genotype extraction by choosing which individuals to keep, write a file with those chosen (.ind) and everyone else labeled as ignored, write a parameter file, run convertf -p, and check the output. Originally I had planned my own .geno reader, but instead of that I would like to do something more simple that consolidates everything that interacts with convertf to go into one place and can be called with a function. I want the output data to have a clear traceable trail. Please add any features or design as needed to fulfill the requirements and to ensure it has failsafes and future modification ability. Can you help me modify and add to my existing code?"
+- **Exact output (verbatim):**
+That report is exactly what `select` was built to show: each filter's effect, step by step. Notice the last line. In the United Kingdom between 1000 and 1500 BP, **12 rows** were extra datasets for people already selected, and deduplication removed them. Without that step, those 12 people would have been counted twice.
+
+### The `convertf` wrapper
+
+This step turns `aadrkit` from a metadata tool into a genotype tool. It automates the five manual steps:
+
+| Manual step | Now done by code |
+|---|---|
+| Choose which individuals to keep | `select()` |
+| Write a `.ind` with everyone else labeled `Ignore` | `write_selection_ind()` |
+| Write the parameter file | `write_par()` |
+| Run `convertf -p ...` | `subprocess.run(...)` |
+| Check the output | count the output individuals; tests check the genotypes |
+
+All of this goes into one function, **`extract_genotypes()`**.
+
+### The "backend" idea from your proposal
+
+You planned an `AADRBackend` design so (your own `.geno` reader) could replace `convertf` later without rewriting the filters. Here's a lighter version of that idea: **everything that touches `convertf` lives in one module, `convertf.py`, behind one public function, `extract_genotypes()`.** The filters and `select()` know nothing about `convertf`. A future module would just provide its own `extract_genotypes()` with the same inputs and outputs, and nothing else would change.
+
+That keeps the design goal (swappable genotype reading) without extra machinery. 
+
+### Keeping a record of every extraction
+
+`extract_genotypes()` keeps **the modified `.ind`, the parameter file, and `convertf`'s log** next to the output files. Anyone looking at an output later can see exactly how it was made, and rerun it.
+
+### Write `convertf.py`
+
+Create `src/aadrkit/convertf.py`:
+
+```python
+"""Extract genotypes for selected individuals by running EIGENSOFT's convertf.
+
+This module is aadrkit's "convertf backend": it is the only part of the
+package that reads AADR's genotype files. A different backend (for example,
+a pure-Python .geno reader) could replace it by providing the same
+extract_genotypes() function.
+"""
+import shutil
+import subprocess
+from pathlib import Path
+
+import pandas as pd
+
+# Output file suffixes for each convertf output format.
+OUTPUT_SUFFIXES = {
+    "EIGENSTRAT": (".geno", ".snp", ".ind"),
+    "PACKEDANCESTRYMAP": (".geno", ".snp", ".ind"),
+    "PACKEDPED": (".bed", ".bim", ".fam"),    # PLINK binary format
+}
+
+
+def read_ind(path):
+    """Read an EIGENSTRAT .ind file: one line per individual (ID, sex, population)."""
+    return pd.read_csv(path, sep=r"\s+", header=None,
+                       names=["genetic_id", "sex", "population"], dtype=str)
+
+
+def write_selection_ind(ind, genetic_ids, path):
+    """Write a copy of `ind` where everyone not in `genetic_ids` is labeled "Ignore".
+
+    Every line is kept, in the original order, because convertf matches
+    the .ind lines to the genotype file by position.
+    """
+    marked = ind.copy()
+    marked.loc[~marked["genetic_id"].isin(genetic_ids), "population"] = "Ignore"
+    marked.to_csv(path, sep=" ", header=False, index=False)
+    return marked
+
+
+def write_par(path, settings):
+    """Write a convertf parameter file, one "name: value" line per setting."""
+    lines = [f"{name}: {value}" for name, value in settings.items()]
+    Path(path).write_text("\n".join(lines) + "\n")
+
+
+def extract_genotypes(selected, geno, snp, ind, out_prefix, output_format="EIGENSTRAT"):
+    """Write genotype files containing only the individuals in `selected`.
+
+    `selected` is a table from select() or the filters (it needs a
+    genetic_id column). `geno`, `snp` and `ind` are the AADR genotype files.
+    Outputs are written as out_prefix + suffix. The modified .ind, the
+    parameter file and convertf's log are kept next to them as a record of
+    exactly how the files were made. Returns a dict of output paths.
+    """
+    if output_format not in OUTPUT_SUFFIXES:
+        raise ValueError(f"output_format must be one of {sorted(OUTPUT_SUFFIXES)}, "
+                         f"got {output_format!r}")
+    if shutil.which("convertf") is None:
+        raise RuntimeError("convertf not found; run `conda activate aadr-project` first")
+    for path in (geno, snp, ind):
+        if not Path(path).exists():
+            raise FileNotFoundError(path)
+
+    ids = set(selected["genetic_id"])
+    if not ids:
+        raise ValueError("No individuals selected")
+    full_ind = read_ind(ind)
+    missing = ids - set(full_ind["genetic_id"])
+    if missing:
+        raise ValueError(f"{len(missing)} selected IDs are not in {ind}, "
+                         f"e.g. {sorted(missing)[:5]}")
+
+    out_prefix = Path(out_prefix)
+    out_prefix.parent.mkdir(parents=True, exist_ok=True)
+    geno_suffix, snp_suffix, ind_suffix = OUTPUT_SUFFIXES[output_format]
+    outputs = {
+        "geno": f"{out_prefix}{geno_suffix}",
+        "snp": f"{out_prefix}{snp_suffix}",
+        "ind": f"{out_prefix}{ind_suffix}",
+        "selection_ind": f"{out_prefix}_selection.ind",
+        "par": f"{out_prefix}.par",
+        "log": f"{out_prefix}.log",
+    }
+
+    write_selection_ind(full_ind, ids, outputs["selection_ind"])
+    write_par(outputs["par"], {
+        "genotypename": geno,
+        "snpname": snp,
+        "indivname": outputs["selection_ind"],
+        "outputformat": output_format,
+        "genotypeoutname": outputs["geno"],
+        "snpoutname": outputs["snp"],
+        "indivoutname": outputs["ind"],
+        "hashcheck": "NO",
+    })
+
+    result = subprocess.run(["convertf", "-p", outputs["par"]],
+                            capture_output=True, text=True)
+    Path(outputs["log"]).write_text(result.stdout + result.stderr)
+    if result.returncode != 0:
+        raise RuntimeError(f"convertf failed (exit code {result.returncode}); "
+                           f"see {outputs['log']}")
+
+    with open(outputs["ind"]) as handle:
+        n_out = sum(1 for _ in handle)
+    if n_out != len(ids):
+        raise RuntimeError(f"Expected {len(ids)} individuals in {outputs['ind']}, "
+                           f"found {n_out}")
+    return outputs
+```
+
+### How it works
+
+**`OUTPUT_SUFFIXES`** maps each output format to its three file extensions. EIGENSTRAT and packed formats use `.geno/.snp/.ind`. PLINK's binary format, which `convertf` calls `PACKEDPED`, uses `.bed/.bim/.fam`. This is how `aadrkit` delivers the PLINK export promised in your problem statement, through one setting.
+
+**`read_ind`** reads the `.ind` file:
+- **`sep=r"\s+"`** means "one or more spaces or tabs between columns." It also ignores the leading padding you saw.
+- **`header=None`** says the file has no header row, and `names=[...]` supplies column names.
+- **`dtype=str`** keeps every value as text, so no ID is ever accidentally converted to a number.
+
+**`write_selection_ind`** is your `awk` command, in pandas:
+- **`marked.loc[~marked["genetic_id"].isin(genetic_ids), "population"] = "Ignore"`** means: in rows whose ID is **not** selected, set the population column to `Ignore`. `.loc[rows, column] = value` is pandas' way of changing specific cells.
+- **The docstring repeats the key rule**: every line stays, in its original order, because `convertf` matches `.ind` lines to the genotype file by position.
+
+**`write_par`** turns a dictionary of settings into the `name: value` lines you wrote by hand.
+- **`"\n".join(lines)`** joins the lines with line breaks.
+- **`Path(path).write_text(...)`** writes the text to a file in one step.
+
+**`extract_genotypes`**, in order:
+
+1. **It checks everything before running anything slow**, so mistakes fail in seconds, not after `convertf` has worked for a minute:
+   - an unknown output format;
+   - `convertf` not available. **`shutil.which("convertf")`** looks for the program the same way your terminal's `which` command does, and the error message tells the user exactly what to do;
+   - any of the three input files missing;
+   - an empty selection;
+   - **selected IDs that aren't in the `.ind`.** This would mean the `.anno` and genotype files don't belong together, the matching-by-ID principle from Step 5 in code.
+2. **It creates the output folder if needed:** `mkdir(parents=True, exist_ok=True)` creates any missing parent folders and doesn't complain if the folder already exists.
+3. **It builds all the output paths** in one dictionary, so the function returns them all together.
+4. **It writes the selection `.ind` and the parameter file**, using the same settings as your hand-written `convertf_test.par`.
+5. **It runs `convertf`** with `subprocess.run`:
+   - The command is a **list**, `["convertf", "-p", par_path]`: the program and each argument as separate items. That's safer than one long string, because a path containing spaces or special characters can't be misinterpreted.
+   - **`capture_output=True`** collects what `convertf` prints instead of showing it on screen, and **`text=True`** returns it as text rather than raw bytes.
+   - The output is **always saved to the log file**, whether it succeeded or not.
+   - **`result.returncode`** is the program's exit code: 0 means success; anything else means it failed. On failure, the error message points to the log, where `convertf`'s own explanation will be.
+6. **It checks the result**, the automated version of `cat test_out.ind`:
+   - **`sum(1 for _ in handle)`** counts the lines in the output individual file by adding 1 for each line.
+   - The count must equal the number selected. This catches a failure even if `convertf` happened to exit with code 0.
+
+### Make it available from the package
+
+Update `src/aadrkit/__init__.py`:
+
+```python
+"""aadrkit: filter and export subsets of the Allen Ancient DNA Resource (AADR)."""
+
+from aadrkit.anno import list_values, load_anno
+from aadrkit.convertf import extract_genotypes
+from aadrkit.query import select
+
+__version__ = "0.1.0"
+```
+
+### Tests, fast and slow
+
+Running `convertf` on the full 6.7 GB file takes over a minute. You don't want to wait for that every time you run the tests, but you do want it tested. pytest handles this with **markers**: labels on tests that let you choose which ones to run.
+
+### Register the marker
+
+Add this to the bottom of `pyproject.toml`:
+
+```toml
+[tool.pytest.ini_options]
+markers = ["slow: runs convertf on the full genotype file (about 1-2 minutes)"]
+```
+
+Registering a marker tells pytest it's intentional, rather than a typo, and the description shows up in pytest's help output.
+
+### Add a fixture for the genotype files
+
+Add this to `tests/conftest.py`, below the other fixtures:
+
+```python
+@pytest.fixture(scope="session")
+def genotype_files():
+    """Paths to the AADR genotype files: (.geno, .snp, .ind)."""
+    paths = tuple(
+        ROOT / "data" / "raw" / f"v66.p1_1240K.aadr.patch.PUB.{ext}"
+        for ext in ("geno", "snp", "ind")
+    )
+    if not all(p.exists() for p in paths):
+        pytest.skip("AADR genotype files not found; see README 'Data' section")
+    return paths
+```
+
+The filenames are built with an f-string rather than pathlib's `with_suffix`, because `with_suffix` would treat `.PUB` as the extension and replace it, a subtle bug with names that contain several dots.
+
+### Write the tests
+
+Create `tests/test_convertf.py`:
+
+```python
+import pandas as pd
+import pytest
+
+from aadrkit.convertf import extract_genotypes, read_ind, write_par, write_selection_ind
+
+
+# --- Fast tests: no convertf needed ---
+
+def test_selection_ind_keeps_every_line_in_order(tmp_path):
+    ind = pd.DataFrame({"genetic_id": ["A", "B", "C"],
+                        "sex": ["M", "F", "U"],
+                        "population": ["P1", "P2", "P3"]})
+    path = tmp_path / "selection.ind"
+    write_selection_ind(ind, {"B"}, path)
+    assert path.read_text().splitlines() == ["A M Ignore", "B F P2", "C U Ignore"]
+
+
+def test_write_par(tmp_path):
+    path = tmp_path / "test.par"
+    write_par(path, {"genotypename": "in.geno", "hashcheck": "NO"})
+    assert path.read_text() == "genotypename: in.geno\nhashcheck: NO\n"
+
+
+def test_rejects_unknown_output_format(tmp_path):
+    selected = pd.DataFrame({"genetic_id": ["A"]})
+    with pytest.raises(ValueError):
+        extract_genotypes(selected, "x.geno", "x.snp", "x.ind",
+                          tmp_path / "out", output_format="VCF")
+
+
+# --- Slow test: runs convertf on the real genotype file ---
+
+@pytest.mark.slow
+def test_extracts_correct_genotypes(genotype_files, ground_truth, tmp_path):
+    """Repeats the manual check: called SNPs per person match .anno."""
+    ids = ["VK202.AG", "NA20813.DG", "I13976.SG"]
+    out = extract_genotypes(pd.DataFrame({"genetic_id": ids}), *genotype_files,
+                            tmp_path / "test")
+
+    out_ids = read_ind(out["ind"])["genetic_id"].tolist()
+    assert sorted(out_ids) == sorted(ids)
+
+    chrom = pd.read_csv(out["snp"], sep=r"\s+", header=None, usecols=[1])[1]
+    geno = pd.read_csv(out["geno"], header=None, dtype=str)[0]
+    autosomal = geno[chrom <= 22]
+    expected = ground_truth.set_index("genetic_id")["snps_1240k"]
+    for i, gid in enumerate(out_ids):
+        called = (autosomal.str[i] != "9").sum()
+        assert called == expected[gid], gid
+```
+
+### What the tests check
+
+**`tmp_path`** is a fixture built into pytest: a fresh, empty temporary folder for each test. It's the answer to the question about where test outputs should go. They never touch your repo, and pytest cleans up old temporary folders automatically.
+
+**The three fast tests** run in a fraction of a second:
+- **The selection `.ind`:** only B keeps its real population, every line is still there, and the order hasn't changed. That's the rule `convertf` depends on.
+- **The parameter file:** the exact text that gets written, line breaks included.
+- **An unknown format** like `VCF` is rejected **before** anything else happens. That's why the fake file names `x.geno` and so on don't matter: the function never gets far enough to look for them.
+
+**The slow test** is your validation, automated:
+- **`@pytest.mark.slow`** applies the marker.
+- **`*genotype_files`** unpacks the three paths into three separate arguments. `*` does for a list or tuple what `**` does for a dictionary.
+- **It extracts the same three individuals as before**, then checks that exactly those three came out.
+- **It recounts each person's non-missing autosomal genotypes,** the job your `paste | awk` command did:
+  - **`usecols=[1]`** reads only the chromosome column of the `.snp`.
+  - **`dtype=str` on the genotype file is essential.** Without it, pandas would read a line like `029` as the number 29, dropping the leading zero, and every person's genotype would shift by one position. That's another leading-zero bug avoided.
+  - **`geno[chrom <= 22]`** keeps the autosomes.
+  - **`autosomal.str[i]`** takes the *i*-th character of every line, which is person *i*'s genotype.
+- **Each count must equal that person's `snps_1240k` value** from your hand-verified ground truth: 810,231, 1,101,664, and 281. **`, gid`** after the `assert` is a message: if it fails, pytest shows which individual's count was wrong.
+
+### Run the tests
+
+**Fast tests only**, for everyday use:
+
+```bash
+pytest -m "not slow"
+```
+
+**`-m "not slow"`** runs every test except those marked slow. You should see **59 passed, 1 deselected**: the previous 56 plus the 3 fast tests, with the slow test skipped on purpose.
+
+**Everything**, including the slow test:
+
+```bash
+pytest -v
+```
+
+This takes a minute or two longer, while the slow test runs `convertf` on the full file. You should see **60 passed**.
+
+### Try a real extraction, including PLINK
+
+The slow test checks EIGENSTRAT output. Here's one quick manual check of the **PLINK** format, which no test covers yet. It writes to `data/output/`, which git ignores because it's inside `data/`:
+
+```bash
+python -c "import aadrkit; a = aadrkit.load_anno('data/raw/v66.p1_1240K.aadr.PUB.anno'); s, r = aadrkit.select(a, groups='Scotland_Viking'); g = 'data/raw/v66.p1_1240K.aadr.patch.PUB'; print(aadrkit.extract_genotypes(s, g + '.geno', g + '.snp', g + '.ind', 'data/output/scotland_viking', output_format='PACKEDPED'))"
+```
+
+Then compare the number of individuals:
+
+```bash
+wc -l data/output/scotland_viking.fam
+```
+
+The count should equal the "Selected N rows" that `select` printed.
+
+```bash
+head -n 3 data/output/scotland_viking.fam
+```
+
+This shows how `convertf` lays out a PLINK `.fam` file. Paste those three lines; we'll check the individual IDs are where PLINK expects them, and if so, add a fast test for the PLINK path.
+
+### Commit
+
+```bash
+git add src/aadrkit/convertf.py src/aadrkit/__init__.py pyproject.toml tests/conftest.py tests/test_convertf.py
+```
+
+```bash
+git commit -m "Add convertf backend: extract genotypes for a selection, with tests"
+```
+
+Paste both `pytest` summaries and the `.fam` output.
+- **What I asked next (verbatim):** "There was an error that occurred do to the spaces in my file path. I inspected the log file and it showed me so. I copy and pasted that into Claude and it helped me fix this: 
+```
+parameter file: /tmp/pytest-of-nelin/pytest-2/test_extracts_correct_genotype0/test.par
+genotypename: /mnt/c/Users/nelin/Desktop/GWU Information/GWU Fall 2026/Applied_Computing/project-hds/data/raw/v66.p1_1240K.aadr.patch.PUB.geno
+snpname: /mnt/c/Users/nelin/Desktop/GWU Information/GWU Fall 2026/Applied_Computing/project-hds/data/raw/v66.p1_1240K.aadr.patch.PUB.snp
+indivname: /tmp/pytest-of-nelin/pytest-2/test_extracts_correct_genotype0/test_selection.ind
+outputformat: EIGENSTRAT
+genotypeoutname: /tmp/pytest-of-nelin/pytest-2/test_extracts_correct_genotype0/test.geno
+snpoutname: /tmp/pytest-of-nelin/pytest-2/test_extracts_correct_genotype0/test.snp
+indivoutname: /tmp/pytest-of-nelin/pytest-2/test_extracts_correct_genotype0/test.ind
+hashcheck: NO
+## convertf version: 8640
+bad open /mnt/c/Users/nelin/Desktop/GWU
+fatalx:
+(openit) can't open file /mnt/c/Users/nelin/Desktop/GWU of type r
+ error info: No such file or directory
+ ```
+ "
+- **Exact output (verbatim):**
+## The likely cause: spaces in the path
+
+Look at the path in the error message:
+
+```
+/mnt/c/Users/nelin/Desktop/GWU Information/GWU Fall 2026/Applied_Computing/...
+```
+
+This is `Nicole-ASUS`, where the repo is still in a folder with **spaces** in its name. The parameter file now contains full paths like `genotypename: /mnt/c/Users/nelin/Desktop/GWU Information/...`. If `convertf` splits each line at spaces, as many older command-line programs do, it reads the path as just `/mnt/c/Users/nelin/Desktop/GWU`, a file that doesn't exist.
+
+The log mentions a path that **stops at `GWU`** (or a "cannot open" or "file not found" message for a shortened path).
+
+### Step 1: Make the tool fail clearly instead
+
+Even after fixing your own setup, `aadrkit` should never hand `convertf` a path it can't handle and then report a cryptic "exit code −6." It should catch the problem **before** running and explain it.
+
+In `src/aadrkit/convertf.py`, inside `extract_genotypes`, add this check **right after the output-format check**, before the `shutil.which` line:
+
+```python
+    for path in (geno, snp, ind, out_prefix):
+        if any(ch.isspace() for ch in str(path)):
+            raise ValueError(f"convertf cannot handle paths containing spaces: {path}. "
+                             f"Move the files (or the project) to a folder without spaces.")
+```
+
+- **`str(path)`** turns a `Path` into text, so its characters can be checked.
+- **`any(ch.isspace() for ch in ...)`** is true if any character is a space, tab, or other whitespace.
+- **It goes before the `convertf` and file-existence checks**, so a path with spaces gets *this* clear message rather than a "file not found" error. It also means the check works even on a computer without `convertf`, which makes it easy to test.
+
+Then add a fast test to `tests/test_convertf.py`, after `test_rejects_unknown_output_format`:
+
+```python
+def test_rejects_paths_with_spaces(tmp_path):
+    selected = pd.DataFrame({"genetic_id": ["A"]})
+    with pytest.raises(ValueError, match="spaces"):
+        extract_genotypes(selected, "my data/x.geno", "x.snp", "x.ind", tmp_path / "out")
+```
+
+**`match="spaces"`** checks that the error is the *right* error with the helpful message, not some other `ValueError`.
+
+### Step 2: Move the repo on this computer
+
+On `Nicole-PC`, you already moved the repo to `/mnt/c/Users/nelin/projects/project-hds`, with no spaces. Doing the same here fixes the problem and makes the two computers match.
+
+**a.** Close VS Code windows that have the project open.
+
+**b.** Create the folder, if it doesn't exist on this computer yet:
+
+```bash
+mkdir -p /mnt/c/Users/nelin/projects
+```
+
+**c.** Move the repo:
+
+```bash
+mv "/mnt/c/Users/nelin/Desktop/GWU Information/GWU Fall 2026/Applied_Computing/project-hds" /mnt/c/Users/nelin/projects/
+```
+
+**d.** Go there:
+
+```bash
+cd /mnt/c/Users/nelin/projects/project-hds
+```
+
+**e. Reinstall the package in editable mode.** This step matters: as we discussed with OneDrive, `pip install -e .` recorded the *old* location of `src/aadrkit`, so imports would fail or point to a folder that no longer exists:
+
+```bash
+pip install -e .
+```
+
+**f.** Confirm the package now points to the new location:
+
+```bash
+python -c "import aadrkit; print(aadrkit.__file__)"
+```
+
+The path should start with `/mnt/c/Users/nelin/projects/project-hds`.
+
+### Step 3: Run everything
+
+```bash
+pytest -v
+```
+
+You should see **61 passed**: the 59 from before, the new spaces test, and the slow `convertf` test, which should now pass. Expect it to take a minute or two longer than the fast tests, since that's `convertf` reading the full file.
+
+Then add one line to the README's Setup section, such as *"Keep the project in a folder whose path has no spaces; EIGENSOFT's `convertf` cannot read paths that contain spaces."*, and commit:
+
+```bash
+git add src/aadrkit/convertf.py tests/test_convertf.py README.md
+```
+
+```bash
+git commit -m "Reject paths with spaces before running convertf; document requirement"
+```
+- **Verificaiton:** I read through and thought about each point that Claude wrote on how to construct this. I decided whether it made sense or was unnesseary. I then typed out the code and ran the tests. I inspected all results myself. I followed all instructions to fix the error about the file path with spaces in it. All 61 tests passed once the fixes were applied.

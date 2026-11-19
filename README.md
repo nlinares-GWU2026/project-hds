@@ -5,7 +5,8 @@
 Terms: 
 - bash = Linux or macOS terminal. On Windows use WSL (Ubuntu); Git Bash and Command Prompt cannot run the conda environment or EIGENSOFT.
 - R console = terminal within RStudio or running R in a terminal to move into an R prompt
-- EIGENSOFT's `convertf` is required to read AADR's genotype files, and is only available after `conda activate aadr-project`. See `environment.yml`. 
+- EIGENSOFT's `convertf` is required to read AADR's genotype files, and is only available after `conda activate aadr-project`. See `environment.yml`.
+*Keep the project in a folder whose path has no spaces. EIGENSOFT's `convertf` cannot read paths that contain spaces.* 
 
 ### Python (conda)
 In the bash terminal:

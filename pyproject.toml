@@ -11,3 +11,6 @@ dependencies = ["pandas"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.pytest.ini_options]
+markers = ["slow: runs convertf on the full genotype file (about 1-2 minutes)"]
