@@ -85,6 +85,9 @@ In terminal:
 python scripts/profile_anno.py
 ```
 
+## Output Formats
+`extract_genotypes` writes EIGENSTRAT (`.geno/.snp/.ind`) or PLINK binary (`output_format="PACKEDPED"`: `.bed/.bim/.fam`). In PLINK output, the Genetic ID is the individual ID (column 2 of the `.fam`). The family ID is a sequence number, and the phenotype column is a placeholder set by `convertf`. Each run also writes `_selection.ind`, `.par`, and `.log` files recording exactly how the output was made.
+
 ## Repository Layout
 ```text
 project-hds/

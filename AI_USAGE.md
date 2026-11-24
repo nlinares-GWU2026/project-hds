@@ -1,5 +1,6 @@
 # AI USAGE LOG 
-### Claude had access to my current proposal, project requirements, and project rubric before answering. 
+### Claude had access to my current proposal, project requirements, project rubric, my initial sources, accessions, data, project idea, project guidelines, and goals in initial  chat.
+before answering. 
 - **Tool:**
 - **What I was doing:**
 - **What I asked (verbatim):**
@@ -3453,7 +3454,7 @@ fatalx:
  ```
  "
 - **Exact output (verbatim):**
-## The likely cause: spaces in the path
+### The likely cause: spaces in the path
 
 Look at the path in the error message:
 
@@ -3549,3 +3550,581 @@ git add src/aadrkit/convertf.py tests/test_convertf.py README.md
 git commit -m "Reject paths with spaces before running convertf; document requirement"
 ```
 - **Verificaiton:** I read through and thought about each point that Claude wrote on how to construct this. I decided whether it made sense or was unnesseary. I then typed out the code and ran the tests. I inspected all results myself. I followed all instructions to fix the error about the file path with spaces in it. All 61 tests passed once the fixes were applied.
+
+## Entry 15:
+- **Tool:** Claude (Opus 5.5)
+- **What I was doing:** Running a full extraction with PLINK format.
+- **What I asked (verbatim):** "Now that EIGENSTRAT output is confirmed, to answer the promise in my statement, I need you to help walk me through a full extraction in PLINK format as I have never used this before either. 
+- **Exact output (verbatim):**
+The slow test checks EIGENSTRAT output. PLINK output (`PACKEDPED`) is the other format promised in your problem statement, and nothing has checked it yet. This runs a complete, realistic query: select the Scottish Vikings, then extract their genotypes in PLINK format.
+
+From the repo root, with `(aadr-project)` active:
+
+```bash
+python -c "import aadrkit; a = aadrkit.load_anno('data/raw/v66.p1_1240K.aadr.PUB.anno'); s, r = aadrkit.select(a, groups='Scotland_Viking'); g = 'data/raw/v66.p1_1240K.aadr.patch.PUB'; print(aadrkit.extract_genotypes(s, g + '.geno', g + '.snp', g + '.ind', 'data/output/scotland_viking', output_format='PACKEDPED'))"
+```
+
+What happens, in order:
+
+1. **`load_anno`** reads the metadata.
+2. **`select`** filters to `Scotland_Viking`, excluding outliers and deduplicating, and prints its report, ending with "Selected N rows."
+3. **`extract_genotypes`** runs `convertf` with `PACKEDPED` output. It takes about a minute.
+4. **`print(...)`** shows the dictionary of output paths: `.bed`, `.bim`, `.fam`, plus the selection `.ind`, `.par`, and `.log` record files.
+
+The outputs go in `data/output/`, which git ignores because it's inside `data/`.
+
+### Check the three PLINK files
+
+PLINK's binary format has three files:
+
+- **`.bed`**: the genotypes, in binary, so it can't be read directly.
+- **`.bim`**: one line per SNP.
+- **`.fam`**: one line per individual.
+
+**1. The number of individuals:**
+
+```bash
+wc -l data/output/scotland_viking.fam
+```
+
+It should equal the "Selected N rows" that `select` printed. `extract_genotypes` already checks this count itself, so a mismatch would have raised an error, but it's good to see it with your own eyes.
+
+**2. The individual layout:**
+
+```bash
+head -n 3 data/output/scotland_viking.fam
+```
+
+A PLINK `.fam` file has **six columns**: family ID, individual ID, father, mother, sex, and phenotype. The part to check is **which column holds the Genetic ID** (like `VK202.AG`). PLINK identifies people by the family ID and individual ID together, so the Genetic ID needs to be in a predictable place for anyone linking PLINK results back to the AADR metadata. I'm not certain how `convertf` fills the family ID column. It might copy the individual ID, or use the population label. The output will show us.
+
+**3. The SNP layout:**
+
+```bash
+head -n 3 data/output/scotland_viking.bim
+```
+
+A `.bim` file has six columns: chromosome, SNP ID, genetic position, physical position, and the two alleles. You should recognize the first SNPs from the `.snp` file in Step 5, such as `rs3094315` on chromosome 1 at position 752566.
+
+Paste all three outputs, plus the report table `select` printed. Once we know where the Genetic ID sits in the `.fam`, we'll add a slow test for the PLINK path, so both output formats are covered.
+- **What I asked next (verbatim):** I pasted the output of all commands which ran successfully.
+```bash
+10:50:39 (aadr-project) nelin@Nicole-ASUS project-hds ±|main ✗|→ python -c "import aadrkit; a = aadrkit.load_anno('data/raw/v66.
+p1_1240K.aadr.PUB.anno'); s, r = aadrkit.select(a, groups='Scotland_Viking'); g = 'data/raw/v66.p1_1240K.aadr.patch.PUB'; print(aadrkit.extract_genotypes(s, g + '.geno', g + '.snp', g + '.ind', 'data/output/scotland_viking', output_format='PACKEDPED'))"
+                     Step  Rows_before  Rows_after  Removed                Note
+Exclude Reference Genomes        23089       23085        4     
+    Group Scotland_Viking        23085           7    23078 3 outliers excluded
+       One row per person            7           6        1     
+Selected 6 rows.
+{'geno': 'data/output/scotland_viking.bed', 'snp': 'data/output/scotland_viking.bim', 'ind': 'data/output/scotland_viking.fam', 'selection_ind': 'data/output/scotland_viking_selection.ind', 'par': 'data/output/scotland_viking.par', 'log': 'data/output/scotland_viking.log'}
+10:54:42 (aadr-project) nelin@Nicole-ASUS project-hds ±|main ✗|→ wc -l data/output/scotland_viking.fam
+6 data/output/scotland_viking.fam
+10:55:19 (aadr-project) nelin@Nicole-ASUS project-hds ±|main ✗|→ head -n 3 data/output/scotland_viking.fam
+     1       VK202.AG 0 0 1 2
+     2       VK203.SG 0 0 1 2
+     3       VK204.SG 0 0 1 2
+10:55:24 (aadr-project) nelin@Nicole-ASUS project-hds ±|main ✗|→ head -n 3 data/output/scotland_viking.bim
+1     rs3094315     0.020130       752566 G A
+1    rs12124819     0.020242       776546 A G
+1    rs28765502     0.022137       832918 T C
+```
+- **Exact output (verbatim):**
+This is a complete, end-to-end run of the tool: from a population name to PLINK genotype files in one command. Here's what each piece shows.
+
+### The `select` report
+
+- **Population step:** 7 Scottish Vikings matched, and **3 outliers were excluded**. VK201 is one of them; there are two more you hadn't met. Those three would be in the data if you'd used a simple "contains Viking" search.
+- **Deduplication:** 7 rows became **6 people**, so one Scottish Viking had two datasets.
+
+### The `.fam` file
+
+```
+     1       VK202.AG 0 0 1 2
+```
+
+| Column | Value | Meaning |
+|---|---|---|
+| 1. Family ID | `1`, `2`, `3` | `convertf` numbers individuals in order; this is **not** the population label |
+| 2. Individual ID | `VK202.AG` | **The Genetic ID**, which links back to AADR's metadata |
+| 3–4. Father, mother | `0 0` | Unknown (no family relationships recorded) |
+| 5. Sex | `1` | PLINK's code for male (2 = female, 0 = unknown). VK202 is `M` in the `.ind`, so this is correct |
+| 6. Phenotype | `2` | Set by `convertf`. Not meaningful here; see below |
+
+**Two things for your documentation:**
+
+- **The Genetic ID is in column 2**, and the family ID is just a running number. Anyone linking PLINK results back to the metadata should match on column 2. Many PLINK commands identify people by family ID plus individual ID together, so users need to know the family ID is a sequence number, not a population.
+- **The phenotype column isn't a real trait.** In PLINK, phenotype `2` often means "case" in a case/control study. `convertf` appears to fill in a placeholder, and nobody should read it as meaningful. Confirm it's the same for all six:
+
+```bash
+awk '{print $6}' data/output/scotland_viking.fam | sort | uniq -c
+```
+
+This prints each distinct phenotype value with its count. If you see only `6 2`, every row has the same placeholder.
+
+### The `.bim` file
+
+```
+1     rs3094315     0.020130       752566 G A
+```
+
+It has the same SNPs as the `.snp` file from earlier (`rs3094315` on chromosome 1 at position 752566, alleles G and A) in PLINK's column order. The SNP information came through unchanged.
+
+### A slow test for the PLINK format
+
+The EIGENSTRAT test checks genotype values directly, by reading the text `.geno`. The PLINK `.bed` file is binary, so reading it would need either PLINK itself or a decoder. Instead, this test checks three things it *can* verify reliably:
+
+1. **The Genetic IDs are in column 2** of the `.fam`.
+2. **Sex is translated correctly** from the `.ind` (M → 1, F → 2). You saw these values: VK202 is male, NA20813 and I13976 are female.
+3. **The `.bed` file is exactly the right size.** In PLINK's standard layout, a `.bed` file is a 3-byte header, then one block per SNP. Each genotype takes 2 bits, so 4 people fit in one byte, and every SNP takes `ceil(people ÷ 4)` bytes. For 3 people and 1,233,013 SNPs, that's 1 byte per SNP, so the file must be exactly **3 + 1,233,013 = 1,233,016 bytes**. If any SNPs were missing, or people were added or lost, the size would be wrong.
+
+If `convertf` used PLINK's older "individual-major" layout instead, the size would come out differently and this test would fail, telling us so.
+
+Add `from pathlib import Path` to the imports at the top of `tests/test_convertf.py`, then add this at the bottom:
+
+```python
+@pytest.mark.slow
+def test_extracts_plink_files(genotype_files, tmp_path):
+    """PLINK output: Genetic IDs in .fam column 2, sex coded 1/2, .bed has the right size."""
+    ids = ["VK202.AG", "NA20813.DG", "I13976.SG"]
+    out = extract_genotypes(pd.DataFrame({"genetic_id": ids}), *genotype_files,
+                            tmp_path / "test", output_format="PACKEDPED")
+
+    fam = pd.read_csv(out["ind"], sep=r"\s+", header=None, dtype=str)
+    sex = dict(zip(fam[1], fam[4]))
+    assert sex == {"VK202.AG": "1", "NA20813.DG": "2", "I13976.SG": "2"}
+
+    with open(out["snp"]) as handle:
+        n_snps = sum(1 for _ in handle)
+    assert n_snps == 1233013
+
+    bytes_per_snp = (len(ids) + 3) // 4
+    assert Path(out["geno"]).stat().st_size == 3 + n_snps * bytes_per_snp
+```
+
+### How it works
+
+- **`output_format="PACKEDPED"`** requests PLINK output. The returned dictionary still uses the keys `"geno"`, `"snp"`, and `"ind"`, but they now point to `.bed`, `.bim`, and `.fam`. That's why `out["ind"]` is the `.fam` file here.
+- **`fam[1]` and `fam[4]`** are the second and fifth columns, the Genetic ID and sex code. Remember that pandas counts from 0.
+- **`dict(zip(fam[1], fam[4]))`** pairs each ID with its sex code. `zip` walks two columns side by side, and `dict` turns the pairs into a lookup table. Comparing whole dictionaries checks every person's sex in one assertion, regardless of row order.
+- **The `.bim` line count** must be the full 1,233,013 SNPs, the same number `convertf` reported in Step 5.
+- **`(len(ids) + 3) // 4`** is the "round up" division: `//` divides and drops the remainder, so adding 3 first rounds up. 3 people gives 1 byte per SNP; 5 people would give 2.
+- **`Path(...).stat().st_size`** is the file's size in bytes, the Python version of `ls -l`.
+
+### Run, document, commit
+
+```bash
+pytest -v
+```
+
+You should see **62 passed**, with the two slow tests taking a few minutes together. For everyday runs, `pytest -m "not slow"` still skips them.
+
+Remember to add a short **Output formats** section to the README. 
+
+Then commit:
+
+```bash
+git add tests/test_convertf.py README.md
+```
+
+```bash
+git commit -m "Add slow test for PLINK output; document output formats"
+```
+
+Paste the phenotype check and the `pytest -v` summary. 
+- **Verificaiton:** I ran all commands, all ran successfully. The 6 rows selected matched the lines in the `wc -l` command. Then in the final PLINK test, all 62 passed. A section about output formats was added to the README.
+
+## Entry 16
+- **Tool:** Claude (Opus 5.5)
+- **What I was doing:** Converting aadrkit to CLI.
+- **What I asked (verbatim):** "Now that the core tool works, I need to add a CLI so users can use it without needing to write Python code using "aadrkit - command" or however it would be formatted. I have never developed something like this before so I need help. However I want the following functionality: (1) every option maps directly onto a select() argument, (2) every saved run produces a full record, (3) the terminal part is kept separate from the main code logic. Can you explain how the script or instructions will work? Will I need to add to other existing scripts? I also need test scripts written to see if this CLI will actually run. I want to see how it would work if researchers actually were using it." 
+- **Exact output (verbatim):**
+The core tool works end to end and is fully tested. The last piece is a **command-line interface (CLI)**, so `aadrkit` can be used from the terminal by someone who doesn't write Python.
+
+### The command-line interface
+
+When this step is done, a user will be able to type commands like:
+
+```bash
+aadrkit list country
+aadrkit select --group Scotland_Viking --out data/output/vikings --genotypes --format plink
+```
+
+The CLI will have two **subcommands**, like `git add` and `git commit` are subcommands of `git`:
+
+- **`aadrkit list COLUMN`** shows every value in a column with its count, `list_values()` from the terminal. It's how a user discovers exact labels before filtering.
+- **`aadrkit select ...`** runs `select()` with options given as flags, and optionally saves the results and extracts genotypes.
+
+### Design decisions
+
+**Use `argparse`, Python's built-in tool for reading command-line options.** It's part of the standard library, so there's no new dependency to install and pin.
+
+**Every option maps directly onto a `select()` argument,** with only small spelling changes for the terminal. Command-line flags conventionally use hyphens (`--min-bp`), while Python uses underscores (`min_bp`).
+
+**Every saved run produces a full record.** With `--out PREFIX`, the command writes:
+
+- **`PREFIX_selected.tsv`**: the selected individuals and their metadata, including publications and DOIs.
+- **`PREFIX_report.tsv`**: the step-by-step report.
+- **`PREFIX_command.txt`**: the exact command that was run, plus the `aadrkit` version.
+
+So a folder of outputs always explains itself: what was selected, what each filter removed, and how to rerun it. With `--genotypes`, the `convertf` outputs and their own records are added alongside.
+
+**The terminal handling is kept separate from the logic.** `main()` reads the command line and loads the file. Two separate functions, `run_list` and `run_select`, do the actual work on an already-loaded table. That way, the tests can call `run_select` directly with your session's `anno` fixture, instead of reloading the 13 MB file (about 18 seconds) for every test.
+
+### Write `cli.py`
+
+Create `src/aadrkit/cli.py`:
+
+```python
+"""Command-line interface: run aadrkit from the terminal.
+
+Examples, run from the repository root:
+    aadrkit list country
+    aadrkit select --group Scotland_Viking --out data/output/vikings
+    aadrkit select --min-bp 3000 --max-bp 5000 --country Spain --min-snps 100000 \\
+        --out data/output/spain --genotypes --format plink
+"""
+import argparse
+import shlex
+import sys
+from pathlib import Path
+
+from aadrkit import __version__
+from aadrkit.anno import list_values, load_anno
+from aadrkit.convertf import extract_genotypes
+from aadrkit.query import select
+
+DEFAULT_ANNO = "data/raw/v66.p1_1240K.aadr.PUB.anno"
+DEFAULT_GENO_PREFIX = "data/raw/v66.p1_1240K.aadr.patch.PUB"
+FORMATS = {"eigenstrat": "EIGENSTRAT", "plink": "PACKEDPED"}
+
+
+def build_parser():
+    """Describe every command-line option."""
+    parser = argparse.ArgumentParser(
+        prog="aadrkit",
+        description="Filter and export subsets of the Allen Ancient DNA Resource (AADR).",
+    )
+    parser.add_argument("--anno", default=DEFAULT_ANNO,
+                        help=f"AADR .anno file (default: {DEFAULT_ANNO})")
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    lst = sub.add_parser("list", help="show every value in a column, with counts")
+    lst.add_argument("column", help="column name, e.g. country, group_id, assessment")
+
+    sel = sub.add_parser("select", help="select individuals; optionally save and extract genotypes")
+    sel.add_argument("--min-bp", type=int, help="minimum mean date, in years before 1950 CE")
+    sel.add_argument("--max-bp", type=int, help="maximum mean date, in years before 1950 CE")
+    sel.add_argument("--exclude-present", action="store_true",
+                     help="remove present-day individuals (dated 0 BP)")
+    sel.add_argument("--country", action="append",
+                     help="country label (repeat for several); see 'aadrkit list country'")
+    sel.add_argument("--min-lat", type=float, help="southern edge of a latitude/longitude box")
+    sel.add_argument("--max-lat", type=float, help="northern edge")
+    sel.add_argument("--min-lon", type=float, help="western edge")
+    sel.add_argument("--max-lon", type=float, help="eastern edge (smaller than --min-lon "
+                                                   "means the box crosses 180 degrees)")
+    sel.add_argument("--group", action="append",
+                     help="population base name (repeat for several); see 'aadrkit list group_id'")
+    sel.add_argument("--group-regex", action="store_true",
+                     help="treat --group values as regular expressions")
+    sel.add_argument("--include-outliers", action="store_true",
+                     help="keep population-genetic outliers ('-o' groups)")
+    sel.add_argument("--min-snps", type=int, help="minimum SNPs covered on the 1240K panel")
+    sel.add_argument("--include-references", action="store_true",
+                     help="keep reference genomes (Chimp, Gorilla, ...)")
+    sel.add_argument("--keep-duplicates", action="store_true",
+                     help="keep every dataset per person instead of the best one")
+    sel.add_argument("--out", help="output prefix; writes <out>_selected.tsv, "
+                                   "<out>_report.tsv and <out>_command.txt")
+    sel.add_argument("--genotypes", action="store_true",
+                     help="also extract genotypes with convertf (requires --out)")
+    sel.add_argument("--geno-prefix", default=DEFAULT_GENO_PREFIX,
+                     help=f"prefix of the AADR .geno/.snp/.ind files (default: {DEFAULT_GENO_PREFIX})")
+    sel.add_argument("--format", choices=sorted(FORMATS), default="eigenstrat",
+                     help="genotype output format (default: eigenstrat)")
+    sel.add_argument("--quiet", action="store_true", help="don't print the report")
+    return parser
+
+
+def run_list(args, anno):
+    """`aadrkit list COLUMN`: print each value in a column with its count."""
+    if args.column not in anno.columns:
+        raise SystemExit(f"Unknown column {args.column!r}; choose from: {', '.join(anno.columns)}")
+    print(list_values(anno, args.column).to_string())
+
+
+def run_select(args, anno, command_line=""):
+    """`aadrkit select ...`: run select() and save outputs if --out is given."""
+    if args.genotypes and not args.out:
+        raise SystemExit("--genotypes requires --out")
+
+    selected, report = select(
+        anno,
+        min_bp=args.min_bp, max_bp=args.max_bp, exclude_present=args.exclude_present,
+        countries=args.country,
+        min_lat=args.min_lat, max_lat=args.max_lat, min_lon=args.min_lon, max_lon=args.max_lon,
+        groups=args.group, group_regex=args.group_regex, include_outliers=args.include_outliers,
+        min_snps=args.min_snps, include_references=args.include_references,
+        deduplicate=not args.keep_duplicates, verbose=not args.quiet,
+    )
+    if not args.out:
+        return {}
+
+    prefix = Path(args.out)
+    prefix.parent.mkdir(parents=True, exist_ok=True)
+    outputs = {
+        "selected": f"{prefix}_selected.tsv",
+        "report": f"{prefix}_report.tsv",
+        "command": f"{prefix}_command.txt",
+    }
+    selected.to_csv(outputs["selected"], sep="\t", index=False)
+    report.to_csv(outputs["report"], sep="\t", index=False)
+    Path(outputs["command"]).write_text(f"# aadrkit {__version__}\n{command_line}\n")
+
+    if args.genotypes:
+        g = args.geno_prefix
+        outputs.update(extract_genotypes(selected, f"{g}.geno", f"{g}.snp", f"{g}.ind",
+                                         prefix, output_format=FORMATS[args.format]))
+    if not args.quiet:
+        for name, path in outputs.items():
+            print(f"{name}: {path}")
+    return outputs
+
+
+def main(argv=None):
+    """Entry point for the `aadrkit` command."""
+    if argv is None:
+        argv = sys.argv[1:]
+    args = build_parser().parse_args(argv)
+    if not Path(args.anno).exists():
+        raise SystemExit(f"AADR .anno file not found: {args.anno} (see README 'Data' section)")
+    anno = load_anno(args.anno)
+    if args.command == "list":
+        run_list(args, anno)
+    else:
+        run_select(args, anno, command_line=shlex.join(["aadrkit", *argv]))
+
+
+if __name__ == "__main__":
+    main()
+```
+
+### How `build_parser` works
+
+`argparse` builds a **parser**: a description of every option the command accepts. It then reads the command line, checks it, and produces an object holding the values.
+
+- **`ArgumentParser(prog=..., description=...)`** creates the main parser. The description appears in `aadrkit --help`.
+- **`--anno` belongs to the main parser**, so it applies to both subcommands. Because of that, it goes **before** the subcommand name: `aadrkit --anno other.anno list country`.
+- **`add_subparsers(dest="command", required=True)`** sets up subcommands. The chosen name (`list` or `select`) is stored in `args.command`, and `required=True` means a bare `aadrkit` with no subcommand is an error.
+- **`add_argument` options:**
+  - **`type=int` / `type=float`** converts the typed text into a number and rejects anything that isn't one. `--min-bp abc` gives a clear error.
+  - **`action="store_true"`** creates an on/off switch. The flag takes no value; it's `True` if present and `False` if absent.
+  - **`action="append"`** allows a flag to be repeated, collecting the values into a list: `--country Spain --country Portugal` becomes `["Spain", "Portugal"]`. That list goes straight into `select(countries=...)`, which already accepts lists.
+  - **`choices=[...]`** restricts a value to fixed options. `--format vcf` is rejected with a message listing the valid ones.
+  - **`default=...`** is used when the flag isn't given. The two path defaults match your repo's layout, so commands run from the repo root work without typing the long file names.
+  - **`help=...`** is the description shown by `--help`. This is documentation that lives right next to the code it describes.
+- **Hyphens become underscores automatically:** `--min-bp` is read back as `args.min_bp`.
+- **Negative numbers work as values:** `--min-lon -170` is understood as the number −170, not a new flag.
+
+### How the other functions work
+
+**`run_list`** checks the column name, then prints `list_values`.
+- **`raise SystemExit("message")`** is the standard way for a command-line program to stop with an error. It prints the message and exits with a failure code, without the long traceback a Python error would show. Tracebacks help programmers; a terminal user just needs to know what to fix.
+
+**`run_select`:**
+1. Rejects `--genotypes` without `--out`, before doing any work, since there would be nowhere to write the files.
+2. Calls `select()` with each flag passed to the matching argument. `deduplicate=not args.keep_duplicates` turns the "keep duplicates" switch into `select`'s "deduplicate" option. `verbose=not args.quiet` does the same for printing.
+3. Without `--out`, it stops after printing the report. That's useful for quick exploration ("how many would this select?").
+4. With `--out`, it writes the three record files. `to_csv(..., sep="\t", index=False)` writes tab-separated files without pandas' row numbers.
+5. With `--genotypes`, it calls `extract_genotypes`, translating the friendly format names (`eigenstrat`, `plink`) into `convertf`'s names. **`outputs.update(...)`** adds the genotype file paths to the same dictionary.
+6. It lists every file it wrote.
+
+**`main`** ties it together:
+- **`argv=None`**: when run from the terminal, it reads the real command line, `sys.argv[1:]` (everything after the program name). Tests can pass their own list instead.
+- **It checks the `.anno` file exists**, giving a friendly message rather than a traceback.
+- **`shlex.join(["aadrkit", *argv])`** rebuilds the exact command as one line of text, adding quotes wherever needed. For example, a group name containing a space would be quoted, so the recorded command can be copied and rerun exactly. `*argv` spreads the list of arguments into the new list.
+- **`if __name__ == "__main__": main()`** lets the file also be run as `python -m aadrkit.cli`. `__name__` equals `"__main__"` only when the file is run directly, not when it's imported.
+
+### Register the `aadrkit` command
+
+In `pyproject.toml`, add this section **directly after the `[project]` section**, before `[tool.setuptools.packages.find]`:
+
+```toml
+[project.scripts]
+aadrkit = "aadrkit.cli:main"
+```
+
+This tells pip: "create a terminal command named `aadrkit` that runs the `main` function in `aadrkit/cli.py`." It's how `pytest` and `pip` themselves become commands.
+
+pip only creates commands during installation, so reinstall:
+
+```bash
+pip install -e .
+```
+
+Then check it worked:
+
+```bash
+aadrkit --help
+```
+
+```bash
+aadrkit select --help
+```
+
+The second shows every `select` option with its help text. That's the `help=` strings you wrote, formatted automatically.
+
+### Write the tests
+
+Create `tests/test_cli.py`:
+
+```python
+import pandas as pd
+import pytest
+
+from aadrkit.cli import build_parser, run_list, run_select
+
+
+def parse(*argv):
+    """Parse a command line the way the terminal would."""
+    return build_parser().parse_args(list(argv))
+
+
+# --- Parsing: no data needed ---
+
+def test_parser_maps_options():
+    args = parse("select", "--min-bp", "1000", "--country", "Spain", "--country", "Portugal",
+                 "--group", "Poland_IA", "--min-lon", "-170", "--format", "plink")
+    assert args.min_bp == 1000
+    assert args.country == ["Spain", "Portugal"]
+    assert args.group == ["Poland_IA"]
+    assert args.min_lon == -170.0
+    assert args.format == "plink"
+
+
+def test_parser_rejects_unknown_format():
+    with pytest.raises(SystemExit):
+        parse("select", "--format", "vcf")
+
+
+# --- Running commands on the real data ---
+
+def test_genotypes_require_out(anno):
+    with pytest.raises(SystemExit):
+        run_select(parse("select", "--genotypes", "--quiet"), anno)
+
+
+def test_select_writes_outputs(anno, tmp_path):
+    args = parse("select", "--group", "Scotland_Viking", "--out", str(tmp_path / "vik"), "--quiet")
+    outputs = run_select(args, anno, command_line="aadrkit select --group Scotland_Viking")
+
+    selected = pd.read_csv(outputs["selected"], sep="\t")
+    ids = set(selected["genetic_id"])
+    assert len(selected) == 6
+    assert "VK202.AG" in ids and "VK201.AG" not in ids
+
+    report = pd.read_csv(outputs["report"], sep="\t")
+    assert len(report) == 3          # reference genomes, group, one row per person
+
+    assert "Scotland_Viking" in open(outputs["command"]).read()
+
+
+def test_list_prints_values(anno, capsys):
+    run_list(parse("list", "country"), anno)
+    printed = capsys.readouterr().out
+    assert "Spain" in printed and "802" in printed
+
+
+def test_list_rejects_unknown_column(anno):
+    with pytest.raises(SystemExit):
+        run_list(parse("list", "planet"), anno)
+```
+
+### What the tests check
+
+**`parse(*argv)`** is a small helper that turns `parse("select", "--min-bp", "1000")` into what the terminal would produce from `aadrkit select --min-bp 1000`. Each word of the command is a separate string, exactly as the terminal splits them.
+
+**Parsing tests** (instant, no data):
+- **Option mapping:** the date becomes a number, the repeated `--country` becomes a list, `-170` is read as a negative number rather than a flag, and the format is stored.
+- **An invalid format** is rejected. `argparse` reports errors by raising `SystemExit`, which is why the test expects that rather than `ValueError`.
+
+**Command tests** use the session `anno` fixture, so the file isn't reloaded:
+- **`--genotypes` without `--out`** stops with a clear message.
+- **A full saved run** uses the same query you ran by hand. The saved table must have **6** people, matching that run, with VK202 included and the outlier VK201 excluded. The report must have **3** steps, and the command file must record what was run. Counting the report's rows, rather than reading specific column names, keeps this test working with the column labels you've chosen.
+- **`capsys`** is another built-in pytest fixture. It **captures everything printed** during the test, and `capsys.readouterr().out` returns it as text. That's how the test checks that `list country` printed "Spain" with its count of 802, the number you've now confirmed three different ways.
+- **An unknown column** stops with a message listing the valid columns.
+
+### Check, run, and try it
+
+```bash
+pytest --collect-only -q | tail -n 3
+```
+
+You should see **68 tests collected**: the previous 62 plus 6.
+
+```bash
+pytest -m "not slow"
+```
+
+Then use the tool the way a researcher would:
+
+```bash
+aadrkit list country | head -n 10
+```
+
+This shows the ten countries with the most individuals. `| head -n 10` keeps the output short.
+
+```bash
+aadrkit select --min-bp 1000 --max-bp 1500 --country "United Kingdom" --min-snps 100000
+```
+
+This is the same query as your earlier example, now from the terminal. The report should again end with **208**. The quotes keep "United Kingdom" together as one value; without them, the terminal would split it into two words.
+
+```bash
+aadrkit select --group Scotland_Viking --out data/output/vikings_cli --genotypes --format plink
+```
+
+This is the full workflow in one command: select, save the record files, and extract PLINK genotypes.
+
+```bash
+ls data/output/vikings_cli*
+```
+
+You should see the three record files (`_selected.tsv`, `_report.tsv`, `_command.txt`) plus the PLINK files and their records (`.bed`, `.bim`, `.fam`, `_selection.ind`, `.par`, `.log`).
+
+```bash
+cat data/output/vikings_cli_command.txt
+```
+
+This shows the version and the exact command, ready to be copied and rerun.
+
+### Commit
+
+```bash
+git add src/aadrkit/cli.py pyproject.toml tests/test_cli.py
+```
+
+```bash
+git commit -m "Add aadrkit command-line interface with list and select subcommands"
+```
+
+Paste the `pytest` summary and the output of the Scottish Viking command.
+- **Verificaiton:** Upon testing: 68 tests were collected, 66 passed and 2 were deselected (slow runs), it correctly showed the 10 countries with the most individuals with `aadrkit list country | head -n 10`, correctly printed the same output from earlier from `aadrkit select --min-bp 1000 --max-bp 1500 --country "United Kingdom" --min-snps 100000` with 208 rows after and United Kingdowm kept as one value, the entire workflow passed producing the correct select search, record files, and extracted PLINK genotypes with `aadrkit select --group Scotland_Viking --out data/output/vikings_cli --genotypes --format plink`: 
+```bash
+ --genotypes --format plink
+                     Step  Rows_before  Rows_after  Removed                Note
+Exclude Reference Genomes        23089       23085        4
+Group ['Scotland_Viking']        23085           7    23078 3 outliers excluded
+       One row per person            7           6        1
+Selected 6 rows.
+selected: data/output/vikings_cli_selected.tsv
+report: data/output/vikings_cli_report.tsv
+command: data/output/vikings_cli_command.txt
+geno: data/output/vikings_cli.bed
+snp: data/output/vikings_cli.bim
+ind: data/output/vikings_cli.fam
+selection_ind: data/output/vikings_cli_selection.ind
+par: data/output/vikings_cli.par
+log: data/output/vikings_cli.log
+```
+, and finally produced the exact command written down and version of aadrkit ready to be copied. 
+I caught a few coding errors (typos and indentations of my own fault) along the way and repaired and investigated as necessary. The tool is now fully functional. s

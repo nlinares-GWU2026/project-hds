@@ -1,6 +1,7 @@
 import pandas as pd
 import pytest
 from aadrkit.convertf import extract_genotypes, read_ind, write_par, write_selection_ind
+from pathlib import Path
 
 # Fast tests: no convertf needed
 def test_selection_ind_keeps_every_line_in_order(tmp_path): # tmp_path is empty temp folder for each test
@@ -52,3 +53,22 @@ def test_extracts_correct_genotypes(genotype_files, ground_truth, tmp_path):
         
 
 
+@pytest.mark.slow
+def test_extracts_plink_files(genotype_files, tmp_path):
+    """PLINK output: Genetic IDs in the .fam column 2, sex coded 1/2, .bed has the right size."""
+    ids = ["VK202.AG", "NA20813.DG", "I13976.SG"]
+    out = extract_genotypes(pd.DataFrame({"genetic_id": ids}), *genotype_files,
+                            tmp_path / "test", output_format="PACKEDPED") # Requests PLINK output, returned output still uses keys "geno", "snp", "ind" but they now point to .bed, .bim, .fam
+
+    fam = pd.read_csv(out["ind"], sep=r"\s+", header=None, dtype=str)
+    sex = dict(zip(fam[1], fam[4])) # Second and fifth columns, Genetic ID and sex code - pandas counts from 0
+    # Pairs each ID with its sex code. zip walks 2 columns side by side, dict turns pairs into lookup table
+    # Comparing whole dictionaries checks every person's sex in one assertion, regardless of row order
+    assert sex == {"VK202.AG": "1", "NA20813.DG": "2", "I13976.SG": "2"}
+
+    with open(out["snp"]) as handle:
+        n_snps = sum(1 for _ in handle)
+    assert n_snps == 1233013 # .bim line counts must be the full 1,233,013 SNPs, the same number reported by convertf
+
+    bytes_per_snp = (len(ids) + 3) // 4 # "Round up" division, 3 people gives 1 byte per SNP, 5 people would give 2
+    assert Path(out["geno"]).stat().st_size == 3 + n_snps * bytes_per_snp
