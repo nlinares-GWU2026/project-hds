@@ -4127,4 +4127,160 @@ par: data/output/vikings_cli.par
 log: data/output/vikings_cli.log
 ```
 , and finally produced the exact command written down and version of aadrkit ready to be copied. 
-I caught a few coding errors (typos and indentations of my own fault) along the way and repaired and investigated as necessary. The tool is now fully functional. s
+I caught a few coding errors (typos and indentations of my own fault) along the way and repaired and investigated as necessary. The tool is now fully functional.
+
+## Entry 17
+- **Tool:** Claude (Opus 5.5)
+- **What I was doing:** Fixing Dockerfile.
+- **What I asked (verbatim):** "I am still unfamiliar with Dockerfile, this is the current one I had as part of my Lab 1 from this course, how do I update it to work for aadrkit? (Pasted: 
+FROM condaforge/miniforge3:latest
+WORKDIR /workspace
+COPY environment.yml .
+RUN mamba env create -f environment.yml && mamba clean -afy
+COPY scripts/ scripts/
+SHELL ["conda", "run", "-n", "aadr-project", "/bin/bash", "-c"]
+CMD ["conda", "run", "--no-capture-output", "-n", "aadr-project", "python", "--version"]
+)
+- **Exact output (verbatim):**
+Your Dockerfile was written for Lab 1, before `aadrkit` existed, so it needs a few changes. One of them would make the build fail outright.
+
+### What needs to change, and why
+
+**1. The build would fail.** Your `environment.yml` now ends with `pip: - -e .`, which installs `aadrkit` from `pyproject.toml` and `src/`. But the Dockerfile only copies `environment.yml` before creating the environment, so pip would find nothing to install. The package files must be copied in **first**.
+
+**2. It runs `python --version`.** That was the Lab 1 smoke test. The container should run `aadrkit` itself.
+
+**3. Docker would try to send your 6.8 GB of data to the build.** When you run `docker build .`, Docker first packages up the **whole folder** (the "build context") and sends it to the Docker engine, even files the Dockerfile never copies. That includes `data/`. A **`.dockerignore`** file excludes them, the same way `.gitignore` works for git.
+
+**4. The `SHELL` line does nothing.** `SHELL` only affects `RUN` lines that come after it, and there are none. It can go.
+
+**5. `scripts/` isn't needed** in the container. Those are exploration scripts. Copying `tests/` instead lets a grader run your test suite inside the container, which is a strong reproducibility check.
+
+### The new Dockerfile
+
+```dockerfile
+FROM condaforge/miniforge3:latest
+
+WORKDIR /workspace
+
+# environment.yml installs aadrkit itself (pip: -e .), so the package
+# source must be in the image before the environment is created.
+COPY environment.yml pyproject.toml ./
+COPY src/ src/
+RUN mamba env create -f environment.yml && mamba clean -afy
+
+COPY tests/ tests/
+
+# Run aadrkit by default; with no arguments, show its help.
+ENTRYPOINT ["conda", "run", "--no-capture-output", "-n", "aadr-project", "aadrkit"]
+CMD ["--help"]
+```
+
+### How it works
+
+- **`COPY environment.yml pyproject.toml ./`** copies both files into `/workspace`. When copying several files, the destination must end in `/`.
+- **`COPY src/ src/`** brings in the package, so the `-e .` line in `environment.yml` can find it.
+- **`RUN mamba env create ...`** builds the environment exactly as on your computers, including EIGENSOFT 9.0.0 and `aadrkit`. `mamba clean -afy` deletes downloaded package files afterward to keep the image smaller.
+- **`COPY tests/ tests/`** comes *after* the environment, on purpose. Docker caches each step; if you change only a test, Docker reuses the cached environment instead of rebuilding it. The catch is that changing anything in `src/` does rebuild the environment, since it was copied before the `RUN` line. That's the price of the editable install, and worth knowing if rebuilds feel slow.
+- **`ENTRYPOINT` and `CMD` work together:**
+  - **`ENTRYPOINT`** is the fixed part: "run `aadrkit` inside the conda environment." `--no-capture-output` makes output appear live, the fix from Lab 1.
+  - **`CMD`** is the default *arguments*, used only when you don't give any. So `docker run aadrkit` shows `--help`, and `docker run aadrkit list country` replaces `--help` with `list country`.
+
+### The `.dockerignore` file
+
+Create `.dockerignore` in the repo root:
+
+```
+data/
+.git/
+renv/library/
+.pytest_cache/
+**/__pycache__/
+*.egg-info/
+```
+
+- **`data/`** is the important one: it keeps the 6.8 GB of AADR files out of the build.
+- **`.git/`, caches, and `*.egg-info/`** are local files the image doesn't need. `*.egg-info` in particular is created by your editable install on your computer, and the image creates its own fresh one.
+
+The data still reaches the container. You attach it when running, as shown below.
+
+### Build and test it
+
+From the repo root, in WSL. These assume Docker Desktop is running.
+
+**1. Build the image:**
+
+```bash
+docker build -t aadrkit .
+```
+
+**`-t aadrkit`** names (tags) the image. The first build takes several minutes, mostly installing the environment.
+
+**2. Run it with no arguments:**
+
+```bash
+docker run --rm aadrkit
+```
+
+You should see the `aadrkit` help text. **`--rm`** deletes the container when it finishes, so stopped containers don't pile up.
+
+**3. Give it your data:**
+
+```bash
+docker run --rm -v "$(pwd)/data:/workspace/data" aadrkit list country
+```
+
+- **`-v HOST:CONTAINER`** is a **volume mount**: it makes your `data/` folder appear inside the container at `/workspace/data`. Nothing is copied; the container reads your files directly.
+- **`$(pwd)`** is replaced by your current folder, so this works from anywhere the repo lives.
+- Because `WORKDIR` is `/workspace` and the CLI's default paths are `data/raw/...`, the defaults just work inside the container, the same as on your computer.
+
+**4. A full genotype extraction:**
+
+```bash
+docker run --rm -v "$(pwd)/data:/workspace/data" aadrkit select --group Scotland_Viking --out data/output/vikings_docker --genotypes --format plink
+```
+
+The outputs are written through the mount, so they appear in **your** `data/output/` folder when the container finishes:
+
+```bash
+ls data/output/vikings_docker*
+```
+
+You should see the same nine files as your `vikings_cli` run. If the container stops with **exit code 137**, it ran out of memory: Docker on WSL is limited by WSL's memory setting, and `convertf` needs about 8 GB.
+
+**5. Run the test suite inside the container:**
+
+```bash
+docker run --rm -v "$(pwd)/data:/workspace/data" --entrypoint conda aadrkit run --no-capture-output -n aadr-project pytest -m "not slow"
+```
+
+- **`--entrypoint conda`** replaces the `aadrkit` entrypoint for this one run, since we want `pytest` instead.
+- Everything after the image name becomes the arguments to `conda`: `run ... -n aadr-project pytest -m "not slow"`.
+- You should see **66 passed, 2 deselected**. That's the same result as on your computers, from an environment built only from your repo's files. It's the strongest reproducibility evidence you can show.
+
+### Optional: pin the base image
+
+`FROM condaforge/miniforge3:latest` means "whatever version is newest when you build." Someone building next year could get a different base. To lock it, after your build succeeds, ask Docker for the exact image you used:
+
+```bash
+docker image inspect condaforge/miniforge3:latest --format '{{index .RepoDigests 0}}'
+```
+
+It prints something like `condaforge/miniforge3@sha256:...`. Replace the `FROM` line with that exact text. A digest identifies one specific image permanently, the same idea as the checksums on your AADR files.
+
+### Update the README's Docker section
+
+Replace the old commands with the ones from steps 1, 3, 4, and 5, plus a sentence explaining that the data isn't in the image and is attached with `-v`.
+
+Then commit:
+
+```bash
+git add Dockerfile .dockerignore README.md
+```
+
+```bash
+git commit -m "Run aadrkit in Docker: install package, mount data, run tests"
+```
+
+Paste the output of steps 2 and 5.
+- **Verificaiton:**
