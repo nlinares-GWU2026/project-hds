@@ -27,11 +27,16 @@ renv::restore()
 
 ### Docker (optional)
 The Dockerfile is included in this repo.
-In the bash terminal after installing and setting up Docker:
+In the bash terminal, after installing and setting up Docker:
 ```bash
-docker build -t aadr-project .
-docker run --rm aadr-project
+docker build -t aadrkit .
+docker run --rm -v "$(pwd)/data:/workspace/data" aadrkit list country
+docker run --rm -v "$(pwd)/data:/workspace/data" aadrkit select --group Scotland_Viking --out data/output/vikings_docker --genotypes --format plink
+ls data/output/vikings_docker*
+docker run --rm -v "$(pwd)/data:/workspace/data" --entrypoint conda aadrkit run --no-capture-output -n aadr-project pytest -m "not slow"
 ```
+
+Data is not in the image, it is attached with `-v`. `-v HOST:CONTAINER` makes the `data/` folder appear inside the container at `/workspace/data`. Nothing is copied - the container reads the files directly from the computer. 
 
 ## Data
 
