@@ -1,5 +1,13 @@
-# Allen Ancient DNA Resource (AADR) Query and Subsetting Tool
-[Explanation]
+# aadrkit: Allen Ancient DNA Resource (AADR) Query and Subsetting Tool
+
+`aadrkit` is a Python package and command-line tool for selecting individuals from the Allen Ancient DNA Resource (AADR) and exporting their genotypes. It filters by date, country, coordinates, population, label, and coverage; reports how many individuals each filter removed; keeps one dataset per person; and uses EIGENSOFT's `convertf` to write EIGENSTRAT or PLINK files ready for downstream tools such as ADMIXTOOLS. Built for PUBH 6854 (Applied Computing), GWU, Fall 2026.
+
+## Requirements
+
+- **Linux, macOS, or WSL on Windows.** EIGENSOFT is not available for native Windows. Git Bash and Command Prompt cannot run the conda environment or EIGENSOFT.
+- **No spaces in file paths.** `convertf` cannot read paths containing spaces; aadrkit checks for this and stops with an explanation.
+- **About 8 GB of free memory** for genotype extraction.
+- **conda or mamba** (example, Miniforge).
 
 ## Setup
 Terms: 
@@ -8,7 +16,6 @@ Terms:
 - EIGENSOFT's `convertf` is required to read AADR's genotype files, and is only available after `conda activate aadr-project`. See `environment.yml`.
 *Keep the project in a folder whose path has no spaces. EIGENSOFT's `convertf` cannot read paths that contain spaces.* 
 
-### Python (conda)
 In the bash terminal:
 ```bash
 git clone https://github.com/nlinares-GWU2026/project-hds.git
@@ -16,7 +23,101 @@ cd project-hds
 mamba env create -f environment.yml
 conda activate aadr-project
 which convertf
+aadrkit --help
 ```
+`mamba` may suggest `mamba activate`. `conda activate` works the same way. EIGENSOFT's `convertf` (needed to read AADR's genotype files) and the `aadrkit` command are only available after `conda activate aadr-project`. If `which convertf` prints a path and `aadrkit --help` prints the help text, the environment is complete and ready to use. 
+
+If you prefer a container, see [Docker](#docker) below.
+
+## Data
+
+This project uses the Allen Ancient DNA Resource (AADR), maintained by the Reich Lab at Harvard Medical School and distributed through the Harvard Dataverse (DOI: [10.7910/DVN/FFIDCW](https://doi.org/10.7910/DVN/FFIDCW)).
+
+- **Dataverse dataset version:** 14.0 (contains AADR release v66.p1)
+- **Files (1240K panel, patch 1 of release v66):**
+  - `v66.p1_1240K.aadr.PUB.anno`: metadata for each individual (plain-text table)
+  -  `v66.p1_1240K.aadr.patch.PUB.geno`: genotypes (about 6.7 GB, packed binary in transposed "TGENO" format)
+  -  `v66.p1_1240K.aadr.patch.PUB.snp`: one line per SNP
+  -  `v66.p1_1240K.aadr.patch.PUB.ind`: one line per individual
+
+Note that the genotype files include `.patch` in their names and the `.anno` file does not.
+
+AADR data is not included in this repository. It is freely available with no access request required, so each user downloads their own copy. the `data/` directory and all AADR file types are listed in `.gitignore`.
+
+## Download
+
+From the repository root:
+```bash
+mkdir -p data/raw
+wget -O data/raw/v66.p1_1240K.aadr.PUB.anno "https://dataverse.harvard.edu/api/access/datafile/13994515"
+wget -c -O data/raw/v66.p1_1240K.aadr.patch.PUB.geno "https://dataverse.harvard.edu/api/access/datafile/13994829"
+wget -c -O data/raw/v66.p1_1240K.aadr.patch.PUB.snp "https://dataverse.harvard.edu/api/access/datafile/13994514"
+wget -c -O data/raw/v66.p1_1240K.aadr.patch.PUB.ind "https://dataverse.harvard.edu/api/access/datafile/13994513"
+```
+
+`-c` resumes an interrupted download. Rerun the same command to continue.
+
+### Verify
+
+```bash
+sha256sum -c docs/data_checksums.txt
+```
+
+Expected output:
+```text
+data/raw/v66.p1_1240K.aadr.PUB.anno: OK
+data/raw/v66.p1_1240K.aadr.patch.PUB.geno: OK
+data/raw/v66.p1_1240K.aadr.patch.PUB.snp: OK
+data/raw/v66.p1_1240K.aadr.patch.PUB.ind: OK
+```
+
+The checksums in `docs/data_checksums.txt` were recorded from files whose MD5 checksums matched the values listed on Dataverse. To check against Dataverse directly:
+```bash
+md5sum data/raw/v66.p1_1240K.aadr.PUB.anno data/raw/v66.p1_1240K.aadr.patch.PUB.*
+```
+
+```text
+a2db1ac16f0f3558ed66fb251e1d5c7d  data/raw/v66.p1_1240K.aadr.PUB.anno
+5ea1d2675a271c81e55b8f8b08b3ff3b  data/raw/v66.p1_1240K.aadr.patch.PUB.geno
+19a434ac954bcd10dbb8dba1d1188a09  data/raw/v66.p1_1240K.aadr.patch.PUB.ind
+50f66178fc81b8aa087cc4b135317e59  data/raw/v66.p1_1240K.aadr.patch.PUB.snp
+```
+
+Checksumming the 6.7 GB `.geno` takes a few minutes.
+
+## Check everything works
+
+```bash
+aadrkit list country | head -n 5
+pytest -m "not slow"
+```
+
+The first command should list the five countries with the most individuals (Russia first). The second should report **66 passed, 2 deselected**.
+
+## Usage
+
+Run commands from the repository root with `conda activate aadr-project`.
+
+### Command line
+
+```bash
+# See the exact labels available for filtering
+aadrkit list country
+aadrkit list group_id
+ 
+# Preview a selection (prints a step-by-step report, saves nothing)
+aadrkit select --min-bp 1000 --max-bp 1500 --country "United Kingdom" --min-snps 100000
+ 
+# Save the selection and extract PLINK genotypes
+aadrkit select --group Scotland_Viking --out data/output/vikings --genotypes --format plink
+
+# Pattern matching on population labels: every Iron Age group in Poland
+aadrkit select --group "_IA$" --group-regex --country Poland
+```
+
+Run `aadrkit select --help` for every option.
+
+**Defaults:** reference genomes (Chimp, Gorilla, etc.) are excluded. Population-genetic outliers ("-o" groups) are excluded from population matches unless `--include-outliers` is given. Each person appears once (the dataset with the most SNPs is kept).  There is no default coverage threshold, so set `--min-snps` explicitly. 
 
 ### R (renv)
 In R or RStudio terminal:
